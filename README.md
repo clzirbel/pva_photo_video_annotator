@@ -4,8 +4,9 @@ A simple yet powerful tool for viewing, organizing, and annotating photos and vi
 
 ## Features
 
-- **Browse Media**: View photos and videos from any folder with a clean, intuitive interface
-- **Organize Media**: Quickly hide unwanted files or move them to a trash folder
+- **Browse Media**: View photos and videos from any folder (including subfolders) with a clean, intuitive interface
+- **Subfolder Support**: When opening a directory, you'll be prompted for each subfolder - choose to include or exclude files from each one
+- **Organize Media**: Quickly hide unwanted files or move them to a "Set Aside" folder
 - **Image Annotations**: Add text descriptions to photos
 - **Video Annotations**: Add time-stamped text annotations throughout videos
 - **Skip Video Segments**: Mark parts of videos to be automatically skipped during playback
@@ -88,7 +89,13 @@ The application requires the following Python packages:
 - **tinytag** (≥1.9.0): Audio/video metadata extraction (for video duration)
 - **Pillow** (≥9.0.0): Image processing library
 
-When you launch the application, select a folder containing your photos and videos. The program will read any existing annotations from an `annotations.json` file in that folder, or create one if it doesn't exist.
+When you launch the application, select a folder containing your photos and videos. You'll be prompted to confirm which subfolders to include in your media library. The program will read any existing annotations from an `annotations.json` file in that folder, or create one if it doesn't exist.
+
+### Supported Formats
+
+**Images**: JPG, JPEG, PNG, GIF, BMP, TIFF, TIF, WebP
+
+**Videos**: MP4, MOV, AVI, MKV, FLV, WMV, WebM, M4V, 3GP
 
 ## Basic Navigation
 
@@ -98,6 +105,8 @@ Use the **Next** and **Previous** buttons to navigate through your media files o
 
 - **Next**: Moves to the next media file in the folder. If you're at the last file, it wraps back to the first.
 - **Previous**: Moves to the previous media file. If you're at the first file, it wraps back to the last.
+- **File Display**: The filename is shown with its relative path, so files in subfolders appear as `SubfolderName/filename.jpg`
+- **Sort Order**: Files are sorted by creation date, not modification date, so they display in the order they were taken
 
 When you navigate to a video, it will automatically start playing.
 
@@ -132,12 +141,12 @@ Click the **Skip** button to hide a media file from view. The file is marked as 
 - It's stored in the `annotations.json` with `"skip": true`
 - Use this for files you want to ignore without permanently deleting them
 
-### Trash Files
+### Set Aside Files
 
-Click the **Trash** button to move a file to a `Trash` subfolder in your media directory.
+Click the **Set Aside** button to move a file to a `set_aside` subfolder in your media directory.
 
 - The file is physically moved (not just marked as skipped)
-- You can recover files by moving them back out of the Trash folder manually
+- You can recover files by moving them back out of the set_aside folder manually
 - Use this when you're sure you don't want a file
 
 ## Location Information
