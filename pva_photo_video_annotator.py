@@ -5,7 +5,7 @@ from bisect import bisect_right
 import requests
 from tinytag import TinyTag
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton,
-    QTextEdit, QVBoxLayout, QHBoxLayout, QComboBox, QSlider, QFileDialog, QMessageBox, QLineEdit)
+    QTextEdit, QVBoxLayout, QHBoxLayout, QComboBox, QSlider, QFileDialog, QMessageBox, QLineEdit, QProgressDialog)
 from PySide6.QtCore import Qt, QTimer, QUrl, QPoint
 from PySide6.QtGui import QPixmap, QImage, QFont
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -46,17 +46,17 @@ def get_file_creation_time(path):
         exif_time = get_exif_datetime(path)
         if exif_time > 0:
             return exif_time
-        
+
         # Fall back to filesystem timestamps
         stat = path.stat()
         times = []
-        
+
         # Collect all available timestamps
         if hasattr(stat, 'st_birthtime'):
             times.append(stat.st_birthtime)  # Birth time (creation date on macOS and some filesystems)
         times.append(stat.st_mtime)  # Modification time (when file was last modified)
         times.append(stat.st_ctime)  # Change/creation time (depends on OS and file operation)
-        
+
         # Return the earliest timestamp
         return min(times)
     except:
@@ -354,10 +354,24 @@ class PVAnnotator(QWidget):
         all_files = list(self.get_all_media_files())
         # Cache creation times for new files (batch operation)
         needs_save = False
-        for file_path in all_files:
+
+        # Show progress dialog during extraction
+        progress = QProgressDialog("Finding original dates for media files...", None, 0, len(all_files), self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setWindowTitle("Extracting Metadata")
+        progress.show()
+
+        for i, file_path in enumerate(all_files):
             if file_path.name not in self.data or "creation_time" not in self.data.get(file_path.name, {}):
                 self.get_cached_creation_time(file_path)
                 needs_save = True
+            # Update progress dialog
+            progress.setValue(i + 1)
+            progress.setLabelText(f"Finding original dates for media files...\n({i + 1} of {len(all_files)})")
+            QApplication.processEvents()  # Allow UI to update
+
+        progress.close()
+
         if needs_save:
             self.save()
         # Sort using cached creation times
@@ -397,12 +411,12 @@ class PVAnnotator(QWidget):
 
         # Get from filesystem and cache it
         creation_time = get_file_creation_time(file_path)
-        
+
         # If no valid creation time found, use default date (2100-01-01 00:10:00) to sort files to the end
         if creation_time == 0:
             default_date = datetime(2100, 1, 1, 0, 10, 0).timestamp()
             creation_time = default_date
-        
+
         entry["creation_time"] = creation_time
         return creation_time
 
