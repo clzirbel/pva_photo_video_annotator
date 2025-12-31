@@ -1,7 +1,7 @@
 {
   "_settings": {
     "font_size": 14,
-    "image_time": 5
+    "image_time": 5.0
   },
   "PXL_20251015_220836835.jpg": {
     "rotation": 90,
@@ -12,7 +12,9 @@
         "longitude": -122.25941
       },
       "automated_text": "Oakland, California, United States"
-    }
+    },
+    "creation_time": 1767168002.4923744,
+    "creation_time_manual": 1767168002.0
   },
   "PXL_20251018_223427037.jpg": {
     "rotation": 0,
@@ -23,7 +25,9 @@
         "longitude": -122.48136
       },
       "automated_text": "San Francisco, California, United States"
-    }
+    },
+    "creation_time": 1767168048.3457208,
+    "creation_time_manual": 1767168230.0
   },
   "PXL_20250623_004528789.jpg": {
     "rotation": 0,
@@ -34,7 +38,8 @@
         "longitude": -121.94108
       },
       "automated_text": "Pacific Grove, California, United States"
-    }
+    },
+    "creation_time": 1767168130.853552
   },
   "PXL_20250601_222146140.jpg": {
     "rotation": 0,
@@ -45,7 +50,8 @@
         "longitude": -122.48138
       },
       "automated_text": "California, United States"
-    }
+    },
+    "creation_time": 1767168149.297691
   },
   "PXL_20230728_175225112.mp4": {
     "text": "",
@@ -87,7 +93,8 @@
     ],
     "location": {
       "manual_text": "Big Basin park, California, United States"
-    }
+    },
+    "creation_time": 1767168294.4434466
   },
   "France": {
     "use": true
@@ -101,7 +108,8 @@
         "longitude": 5.4563
       },
       "automated_text": "Marseille, Provence-Alpes-C\u00f4te d'Azur, France"
-    }
+    },
+    "creation_time": 1767200248.1958842
   },
   "PXL_20230324_155705728.jpg": {
     "rotation": 0,
@@ -112,7 +120,8 @@
         "longitude": 5.36657
       },
       "automated_text": "Marseille, Provence-Alpes-C\u00f4te d'Azur, France"
-    }
+    },
+    "creation_time": 1767200333.7730992
   },
   "PXL_20230328_135543810.jpg": {
     "rotation": 0,
@@ -123,7 +132,8 @@
         "longitude": 7.29921
       },
       "automated_text": "Riquewihr, Grand Est, France"
-    }
+    },
+    "creation_time": 1767200354.7436197
   },
   "PXL_20230331_090338930.jpg": {
     "text": "",
@@ -133,7 +143,8 @@
         "longitude": 7.75391
       },
       "automated_text": "Strasbourg, Grand Est, France"
-    }
+    },
+    "creation_time": 1767200375.846282
   },
   "image_to_set_aside.png": {
     "rotation": 0,
@@ -149,22 +160,30 @@
     "rotation": 0,
     "text": "",
     "location": {},
-    "skip": true
+    "skip": true,
+    "creation_time": 1767201521.0208082
   },
   "image_to_skip_2.gif": {
     "rotation": 0,
     "text": "",
     "location": {},
-    "skip": true
+    "skip": true,
+    "creation_time": 1767201536.604537
   },
   "image_from_paint.gif": {
     "rotation": 0,
     "text": "",
-    "location": {}
+    "location": {},
+    "creation_time": 1767202057.9072113
   },
   "screen_grab.png": {
     "rotation": 0,
     "text": "",
+    "location": {},
+    "creation_time": 1767202175.7916822
+  },
+  "image_from_paint_with_very_very_very_very_super_crazy_long_filename_that_does_not_wrap.gif": {
+    "creation_time": 1767208837.5967362,
     "location": {}
   }
 }
