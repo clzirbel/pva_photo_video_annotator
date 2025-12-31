@@ -13,8 +13,7 @@
       },
       "automated_text": "Oakland, California, United States"
     },
-    "creation_time": 1767168002.4923744,
-    "creation_time_manual": 1767168002.0
+    "creation_time": 1760566116.0
   },
   "PXL_20251018_223427037.jpg": {
     "rotation": 0,
@@ -26,8 +25,7 @@
       },
       "automated_text": "San Francisco, California, United States"
     },
-    "creation_time": 1767168048.3457208,
-    "creation_time_manual": 1767168230.0
+    "creation_time": 1760826867.0
   },
   "PXL_20250623_004528789.jpg": {
     "rotation": 0,
@@ -39,7 +37,7 @@
       },
       "automated_text": "Pacific Grove, California, United States"
     },
-    "creation_time": 1767168130.853552
+    "creation_time": 1750639528.0
   },
   "PXL_20250601_222146140.jpg": {
     "rotation": 0,
@@ -51,7 +49,7 @@
       },
       "automated_text": "California, United States"
     },
-    "creation_time": 1767168149.297691
+    "creation_time": 1748816506.0
   },
   "PXL_20230728_175225112.mp4": {
     "text": "",
@@ -109,7 +107,7 @@
       },
       "automated_text": "Marseille, Provence-Alpes-C\u00f4te d'Azur, France"
     },
-    "creation_time": 1767200248.1958842
+    "creation_time": 1679519889.0
   },
   "PXL_20230324_155705728.jpg": {
     "rotation": 0,
@@ -121,7 +119,7 @@
       },
       "automated_text": "Marseille, Provence-Alpes-C\u00f4te d'Azur, France"
     },
-    "creation_time": 1767200333.7730992
+    "creation_time": 1679702225.0
   },
   "PXL_20230328_135543810.jpg": {
     "rotation": 0,
@@ -133,7 +131,7 @@
       },
       "automated_text": "Riquewihr, Grand Est, France"
     },
-    "creation_time": 1767200354.7436197
+    "creation_time": 1680044143.0
   },
   "PXL_20230331_090338930.jpg": {
     "text": "",
@@ -144,7 +142,7 @@
       },
       "automated_text": "Strasbourg, Grand Est, France"
     },
-    "creation_time": 1767200375.846282
+    "creation_time": 1680285818.0
   },
   "image_to_set_aside.png": {
     "rotation": 0,
@@ -168,7 +166,7 @@
     "text": "",
     "location": {},
     "skip": true,
-    "creation_time": 1767201536.604537
+    "creation_time": 1767201521.133959
   },
   "image_from_paint.gif": {
     "rotation": 0,
@@ -183,7 +181,7 @@
     "creation_time": 1767202175.7916822
   },
   "image_from_paint_with_very_very_very_very_super_crazy_long_filename_that_does_not_wrap.gif": {
-    "creation_time": 1767208837.5967362,
-    "location": {}
+    "location": {},
+    "creation_time": 1767202058.0524397
   }
 }
