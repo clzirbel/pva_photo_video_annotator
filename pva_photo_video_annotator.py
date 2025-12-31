@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QTimer, QUrl, QPoint
 from PySide6.QtGui import QPixmap, QImage, QFont
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PIL import Image, ExifTags
+from PIL import Image, ExifTags, ImageOps
 
 SUPPORTED_IMAGES = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"}
 SUPPORTED_VIDEOS = {".mp4", ".mov", ".avi", ".mkv", ".flv", ".wmv", ".webm", ".m4v", ".3gp"}
@@ -32,14 +32,31 @@ def get_file_creation_time(path):
         return 0
 
 def get_exif_rotation(path):
+    """Get EXIF rotation in degrees. Handles all EXIF orientation values."""
     try:
         img = Image.open(path)
         exif = img._getexif()
         if not exif: return 0
         for k, v in ExifTags.TAGS.items():
-            if v=="Orientation":
-                return {3:180,6:270,8:90}.get(exif.get(k),0)
-    except: return 0
+            if v == "Orientation":
+                orientation = exif.get(k, 1)
+                # Map EXIF orientation to rotation in degrees
+                # Note: Values 2,4,5,7 involve flips; those are now handled by ImageOps.exif_transpose
+                # This function returns the "base" rotation for display purposes
+                orientation_to_degrees = {
+                    1: 0,      # Normal
+                    2: 0,      # Flip horizontal (handled by exif_transpose)
+                    3: 180,    # Rotate 180°
+                    4: 0,      # Flip vertical (handled by exif_transpose)
+                    5: 90,     # Flip + rotate 90° CCW (handled by exif_transpose)
+                    6: 270,    # Rotate 90° CW
+                    7: 270,    # Flip + rotate 90° CW (handled by exif_transpose)
+                    8: 90      # Rotate 90° CCW
+                }
+                return orientation_to_degrees.get(orientation, 0)
+    except:
+        return 0
+    return 0
 
 def get_exif_gps(path):
     """Extract latitude and longitude from EXIF data. Returns (lat, lon) or None."""
@@ -81,13 +98,10 @@ def reverse_geocode_nominatim(lat, lon):
     try:
         url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}"
         headers = {"User-Agent": "PVA-Photo-Video-Annotator/1.0"}
-        print(f"    Calling API: {url}")
         response = requests.get(url, timeout=2, headers=headers)
-        print(f"    API response status: {response.status_code}")
         if response.status_code == 200:
             data = response.json()
             address = data.get("address", {})
-            print(f"    Raw address data: {address}")
             # Build address as City, State, Country
             city = address.get("city") or address.get("town") or address.get("village")
             state = address.get("state")
@@ -99,22 +113,35 @@ def reverse_geocode_nominatim(lat, lon):
             if country: parts.append(country)
 
             result = ", ".join(parts) if parts else None
-            print(f"    Formatted result: {result}")
             return result
-        else:
-            print(f"    API returned status {response.status_code}")
     except requests.Timeout:
-        print(f"    API call timed out (2 second timeout)")
+        pass
     except Exception as e:
-        print(f"    API call failed: {e}")
+        pass
     return None
 
 def load_image(path, rotation):
     img = Image.open(path)
-    if rotation: img = img.rotate(rotation, expand=True)
-    img = img.convert("RGB")
-    qimg = QImage(img.tobytes(), img.width, img.height, QImage.Format_RGB888)
-    return QPixmap.fromImage(qimg)
+    
+    # Apply EXIF orientation if available (returns None if no EXIF, so use 'or img')
+    img = ImageOps.exif_transpose(img) or img
+    
+    # Apply user rotation on top of EXIF orientation
+    if rotation: 
+        img = img.rotate(rotation, expand=True)
+    
+    # Ensure RGB mode for consistency
+    if img.mode != 'RGB':
+        img = img.convert("RGB")
+    
+    # Convert PIL image to QImage with proper stride alignment
+    width, height = img.size
+    img_data = img.tobytes()
+    bytes_per_line = width * 3  # RGB888 format requires 3 bytes per pixel
+    qimg = QImage(img_data, width, height, bytes_per_line, QImage.Format_RGB888)
+    # Make a copy to ensure data persistence after PIL image is garbage collected
+    return qimg.copy()
+
 
 def get_video_duration_ms(video_path):
     """Get video duration in milliseconds using tinytag. Returns duration or None."""
@@ -123,8 +150,8 @@ def get_video_duration_ms(video_path):
         if tag and tag.duration:
             duration_ms = int(tag.duration * 1000)
             return duration_ms
-    except Exception as e:
-        print(f"Could not get duration for {video_path}: {e}")
+    except Exception:
+        pass
     return None
 
 def format_time_ms(ms):
@@ -184,6 +211,11 @@ class PVAnnotator(QWidget):
         self.volume_btn=QPushButton("100% volume")
         self.slide_btn=QPushButton("Slideshow")
         self.next_btn=QPushButton("Next")
+        # Make button text bold
+        bold_font = QFont()
+        bold_font.setBold(True)
+        for btn in [self.prev_btn, self.skip_btn, self.trash_btn, self.rotate_btn, self.volume_btn, self.slide_btn, self.next_btn]:
+            btn.setFont(bold_font)
         for b,f in [(self.prev_btn,self.prev_item),(self.next_btn,self.next_item),
                     (self.skip_btn,self.skip_item),(self.trash_btn,self.trash_item),
                     (self.rotate_btn,self.rotate_item),(self.volume_btn,self.change_volume),
@@ -194,11 +226,14 @@ class PVAnnotator(QWidget):
         self.location_combo=QComboBox(); self.location_combo.setEditable(True)
         self.location_combo.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
         self.location_combo.currentTextChanged.connect(self.update_location_text)
-        self.text_box=QTextEdit(); self.text_box.setFixedHeight(90)
+        self.text_box=QTextEdit(); self.text_box.setFixedHeight(60)
         self.text_box.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
 
         self.skip_in_progress = False
         self.new_annotation_pending = False
+        self.text_scroll_timer = QTimer()
+        self.text_scroll_timer.timeout.connect(self.scroll_annotation_text)
+        self.text_scroll_pos = 0
 
         self.video_widget=QVideoWidget(); self.video_widget.setStyleSheet("background-color: white;")
         self.video_player=QMediaPlayer()  # Qt6 disables hw accel by default
@@ -217,20 +252,28 @@ class PVAnnotator(QWidget):
         self.edit_ann_btn=QPushButton("Edit annotation"); self.edit_ann_btn.clicked.connect(self.edit_annotation)
         self.remove_ann_btn=QPushButton("Remove annotation"); self.remove_ann_btn.clicked.connect(self.remove_annotation)
         self.skip_ann_btn=QPushButton("Skip until next annotation"); self.skip_ann_btn.clicked.connect(self.skip_until_next_annotation)
+        # Make video button fonts bold
+        for btn in [self.play_btn, self.replay_btn, self.add_ann_btn, self.edit_ann_btn, self.remove_ann_btn, self.skip_ann_btn]:
+            btn.setFont(bold_font)
 
-        # Layout
+        # Layout with minimal spacing
         layout=QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
         layout.addWidget(self.image_label)
         layout.addWidget(self.video_widget)
         layout.addWidget(self.video_slider)
         video_btn_layout=QHBoxLayout()
+        video_btn_layout.setSpacing(2)
         for b in [self.play_btn,self.replay_btn,self.add_ann_btn,self.edit_ann_btn,
                   self.remove_ann_btn,self.skip_ann_btn]: video_btn_layout.addWidget(b)
         layout.addLayout(video_btn_layout)
         button_layout=QHBoxLayout()
+        button_layout.setSpacing(2)
         for b in [self.prev_btn,self.skip_btn,self.trash_btn,self.rotate_btn,self.volume_btn,self.slide_btn,self.next_btn]: button_layout.addWidget(b)
         layout.addLayout(button_layout)
         meta_layout=QHBoxLayout()
+        meta_layout.setSpacing(2)
         meta_layout.addWidget(self.meta_label,3); meta_layout.addWidget(self.location_combo,2)
         layout.addLayout(meta_layout)
         layout.addWidget(self.text_box)
@@ -346,10 +389,8 @@ class PVAnnotator(QWidget):
 
         # Extract GPS from EXIF if not already present
         if "latitude_longitude" not in location:
-            print(f"Extracting GPS from {p.name}...")
             gps = get_exif_gps(file_path)
             if not gps:
-                print(f"  No GPS data found in {p.name}")
                 return
 
             lat, lon = gps
@@ -357,20 +398,14 @@ class PVAnnotator(QWidget):
             lat = round(lat, 5)
             lon = round(lon, 5)
             location["latitude_longitude"] = {"latitude": lat, "longitude": lon}
-            print(f"  Found GPS: {lat}, {lon}")
         else:
             lat = location["latitude_longitude"]["latitude"]
             lon = location["latitude_longitude"]["longitude"]
-            print(f"Using existing GPS for {p.name}: {lat}, {lon}")
 
         # Try reverse geocoding
-        print(f"  Reverse geocoding {lat}, {lon}...")
         address = reverse_geocode_nominatim(lat, lon)
         if address:
-            print(f"  Found address: {address}")
             location["automated_text"] = address
-        else:
-            print(f"  No address found or API timeout")
 
         self.save()
 
@@ -429,11 +464,9 @@ class PVAnnotator(QWidget):
             volume = entry.get("volume", 100)
             self.audio_output.setVolume(volume / 100.0)
             self.volume_btn.setText(f"{volume}% volume")
-            print(f"Loading video: {p.name} with volume {volume}%")
             self.video_player.setSource(QUrl.fromLocalFile(str(p)))
             # Use a single-shot timer to allow the source to load before playing
             QTimer.singleShot(100, self.video_player.play)
-            print(f"Video playback starting for: {p.name}")
 
         # Next/Prev labels
         self.prev_btn.setText("Jump to last" if self.index==0 else "Previous")
@@ -710,7 +743,6 @@ class PVAnnotator(QWidget):
             entry.pop("rotation",None)
         else:
             entry["rotation"]=new_rotation
-        print(f"Rotation for '{p.name}': {new_rotation}°")
         self.save()
         self.show_item()
 
@@ -737,7 +769,6 @@ class PVAnnotator(QWidget):
         # Apply volume immediately
         self.audio_output.setVolume(new_volume/100.0)
         self.volume_btn.setText(f"{new_volume}% volume")
-        print(f"Volume for '{p.name}': {new_volume}%")
         self.save()
 
     def trash_item(self):
@@ -746,6 +777,7 @@ class PVAnnotator(QWidget):
 
     def toggle_slideshow(self):
         self.slideshow=not self.slideshow
+        self.text_scroll_timer.stop()
         if self.slideshow:
             self.slide_btn.setText("Stop slideshow")
             p=self.current()
@@ -753,15 +785,14 @@ class PVAnnotator(QWidget):
                 # For videos, get duration and set timer to that
                 dur_ms = get_video_duration_ms(p)
                 if dur_ms and dur_ms > 0:
-                    print(f"Slideshow START: Video '{p.name}' duration is {format_time_ms(dur_ms)} ({dur_ms}ms)")
                     self.timer.start(dur_ms)
                 else:
-                    print(f"Slideshow START: Could not get video duration for '{p.name}', using default {self.get_image_time()}s")
                     self.timer.start(self.get_image_time()*1000)
             else:
-                # For images, use the image time
-                print(f"Slideshow START: Image '{p.name}'")
-                self.timer.start(self.get_image_time()*1000)
+                # For images, use the image time and start text scrolling if needed
+                duration=max(self.get_image_time(),len(self.text_box.toPlainText().split())/4)*1000
+                self.timer.start(int(duration))
+                self.start_text_scroll(int(duration))
         else:
             self.slide_btn.setText("Slideshow")
             self.timer.stop()
@@ -775,18 +806,46 @@ class PVAnnotator(QWidget):
         p=self.current()
         if p.suffix.lower() in SUPPORTED_IMAGES:
             duration=max(self.get_image_time(),len(self.text_box.toPlainText().split())/4)*1000
-            print(f"Slideshow ADVANCE: Image '{p.name}', duration {format_time_ms(int(duration))}")
             self.timer.start(int(duration))
+            self.start_text_scroll(int(duration))
         else:
             # For videos, get duration and set timer to that
             dur_ms = get_video_duration_ms(p)
             if dur_ms and dur_ms > 0:
-                print(f"Slideshow ADVANCE: Video '{p.name}' duration is {format_time_ms(dur_ms)} ({dur_ms}ms)")
                 self.timer.start(dur_ms)
             else:
-                print(f"Slideshow ADVANCE: Could not get video duration for '{p.name}', using default {self.get_image_time()}s")
                 self.timer.start(self.get_image_time()*1000)
         if self.index==0: self.timer.start(self.get_image_time()*1000)
+
+    def start_text_scroll(self, duration_ms):
+        """Start scrolling text if it has more than 3 lines during slideshow."""
+        text = self.text_box.toPlainText()
+        lines = text.split('\n')
+        if len(lines) > 3 and self.slideshow:
+            # Calculate scroll interval: divide duration by number of scroll steps
+            scroll_steps = max(len(lines) - 3, 1)
+            scroll_interval = max(100, duration_ms // (scroll_steps + 1))
+            self.text_scroll_pos = 0
+            self.text_scroll_lines = lines
+            self.text_scroll_timer.start(scroll_interval)
+
+    def scroll_annotation_text(self):
+        """Scroll through multi-line text during slideshow."""
+        if not self.slideshow or not hasattr(self, 'text_scroll_lines'):
+            self.text_scroll_timer.stop()
+            return
+
+        lines = self.text_scroll_lines
+        max_visible_lines = 3
+
+        if self.text_scroll_pos + max_visible_lines < len(lines):
+            self.text_scroll_pos += 1
+            visible_text = '\n'.join(lines[self.text_scroll_pos:self.text_scroll_pos + max_visible_lines])
+            self.text_box.blockSignals(True)
+            self.text_box.setText(visible_text)
+            self.text_box.blockSignals(False)
+        else:
+            self.text_scroll_timer.stop()
 
     def get_image_time(self):
         return self.data.get("_settings",{}).get("image_time",DEFAULT_IMAGE_TIME)
