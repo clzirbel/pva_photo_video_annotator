@@ -1,16 +1,28 @@
-import sys, json, shutil
+import sys, json, shutil, re
 from pathlib import Path
 from datetime import datetime
 from bisect import bisect_right
 import requests
+import os
 from tinytag import TinyTag
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton,
     QTextEdit, QVBoxLayout, QHBoxLayout, QComboBox, QSlider, QFileDialog, QMessageBox, QLineEdit, QProgressDialog)
-from PySide6.QtCore import Qt, QTimer, QUrl, QPoint
-from PySide6.QtGui import QPixmap, QImage, QFont
+from PySide6.QtCore import Qt, QTimer, QUrl, QPoint, QLoggingCategory
+from PySide6.QtGui import QPixmap, QImage, QFont, QColor
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PIL import Image, ExifTags, ImageOps
+try:
+    from hachoir.parser import createParser
+    from hachoir.metadata import extractMetadata
+    HACHOIR_AVAILABLE = True
+except ImportError:
+    HACHOIR_AVAILABLE = False
+try:
+    from pymediainfo import MediaInfo
+    MEDIAINFO_AVAILABLE = True
+except ImportError:
+    MEDIAINFO_AVAILABLE = False
 
 SUPPORTED_IMAGES = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"}
 SUPPORTED_VIDEOS = {".mp4", ".mov", ".avi", ".mkv", ".flv", ".wmv", ".webm", ".m4v", ".3gp"}
@@ -18,6 +30,85 @@ JSON_NAME = "annotations.json"
 TRASH_DIR = "set_aside"
 DEFAULT_FONT_SIZE = 14
 DEFAULT_IMAGE_TIME = 5  # seconds per image
+DATETIME_FMT = "%Y/%m/%d %H:%M:%S"
+LEGACY_DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
+
+def format_creation_timestamp(ts):
+    """Format Unix timestamp to display/save format."""
+    return datetime.fromtimestamp(ts).strftime(DATETIME_FMT)
+
+def parse_creation_value(value):
+    """Parse stored creation time value (string or number) into Unix timestamp."""
+    if value is None:
+        return None
+    # Numeric timestamp
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        for fmt in (DATETIME_FMT, LEGACY_DATETIME_FMT):
+            try:
+                return datetime.strptime(value.strip(), fmt).timestamp()
+            except ValueError:
+                continue
+        # Last resort: try ISO
+        try:
+            return datetime.fromisoformat(value.strip()).timestamp()
+        except Exception:
+            pass
+        # Or numeric string
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+def parse_datetime_string(dt_str):
+    """Parse various datetime string forms into timestamp. Returns None if unparsed."""
+    if not dt_str:
+        return None
+    if isinstance(dt_str, (list, tuple)) and dt_str:
+        dt_str = dt_str[0]
+    s = str(dt_str).strip()
+    # Common cleanups
+    if s.endswith('Z'):
+        s = s[:-1] + '+00:00'
+    if s.endswith(' UTC'):
+        s = s[:-4]
+    if s.lower().startswith('utc '):
+        s = s[4:]
+    # Try ISO first
+    try:
+        return datetime.fromisoformat(s).timestamp()
+    except Exception:
+        pass
+    # Try common fallback formats
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+        try:
+            return datetime.strptime(s, fmt).timestamp()
+        except ValueError:
+            continue
+    return None
+
+def parse_filename_datetime(path):
+    """Try to infer datetime from filename patterns like PXL_YYYYMMDD_HHMMSS.*"""
+    name = path.name
+    # Pattern with date and time
+    m = re.search(r"(20\d{2})(\d{2})(\d{2})[_-]?(\d{2})(\d{2})(\d{2})", name)
+    if m:
+        y, mo, d, h, mi, s = m.groups()
+        try:
+            return datetime(int(y), int(mo), int(d), int(h), int(mi), int(s)).timestamp()
+        except ValueError:
+            pass
+    # Pattern with date only
+    m = re.search(r"(20\d{2})(\d{2})(\d{2})", name)
+    if m:
+        y, mo, d = m.groups()
+        try:
+            return datetime(int(y), int(mo), int(d), 0, 0, 0).timestamp()
+        except ValueError:
+            pass
+    return None
 
 def get_exif_datetime(path):
     """Extract DateTimeOriginal from EXIF data. Returns Unix timestamp or 0 if not found."""
@@ -38,14 +129,91 @@ def get_exif_datetime(path):
         pass
     return 0
 
+def get_video_creation_time(path):
+    """Extract creation time for videos using MediaInfo (QuickTime/MP4 metadata)."""
+    if not MEDIAINFO_AVAILABLE:
+        return 0
+    try:
+        mi = MediaInfo.parse(path)
+    except Exception:
+        mi = None
+
+    candidates = []  # list of tuples (source, raw_value, parsed_ts)
+
+    def add_candidate(label, raw):
+        ts = parse_datetime_string(raw)
+        candidates.append((label, raw, ts))
+        return ts
+
+    def candidate_times(track):
+        data = track.to_data() if hasattr(track, 'to_data') else {}
+        def add_field(key, label=None):
+            val = data.get(key)
+            if val:
+                add_candidate(label or key, val)
+        # QuickTime specific
+        add_field('com.apple.quicktime.creationdate', 'qt_creationdate')
+        # Generic creation_time
+        add_field('creation_time', 'creation_time')
+        add_field('creation_time-eng', 'creation_time-eng')
+        # EXIF-like
+        add_field('date_time_original', 'date_time_original')
+        add_field('datetimeoriginal', 'datetimeoriginal')
+        # Other common date fields
+        add_field('encoded_date', 'encoded_date'); add_field('encoded_date-eng', 'encoded_date-eng')
+        add_field('tagged_date', 'tagged_date'); add_field('tagged_date-eng', 'tagged_date-eng')
+        add_field('recorded_date', 'recorded_date'); add_field('recorded_date-eng', 'recorded_date-eng')
+        # MediaInfo provided lists
+        for attr in ["other_creation_date", "other_recorded_date", "other_encoded_date", "other_tagged_date"]:
+            val = getattr(track, attr, None)
+            if val:
+                add_candidate(attr, val)
+
+    # Collect from MediaInfo
+    if mi and mi.tracks:
+        for track in mi.tracks:
+            if track.track_type not in ("General", "Video"):
+                continue
+            candidate_times(track)
+
+    # Filename-derived candidate
+    filename_ts = parse_filename_datetime(path)
+    candidates.append(("filename", path.name, filename_ts))
+
+    # Filesystem timestamps as last resort
+    try:
+        st = path.stat()
+        fs_candidates = [
+            ("fs_birthtime", getattr(st, 'st_birthtime', None)),
+            ("fs_mtime", st.st_mtime),
+            ("fs_ctime", st.st_ctime),
+        ]
+        for lbl, raw in fs_candidates:
+            candidates.append((lbl, raw, raw if raw else None))
+    except Exception:
+        pass
+
+    # Choose first parsed in order we collected
+    for _, _, ts in candidates:
+        if ts:
+            return ts
+    return 0
+
 def get_file_creation_time(path):
     """Get file creation time - prioritizes EXIF datetime, then uses earliest filesystem timestamp.
     This corresponds to when the file was actually created/taken, not when it was downloaded or edited."""
     try:
-        # First, try to get EXIF datetime (most reliable for photos)
-        exif_time = get_exif_datetime(path)
-        if exif_time > 0:
-            return exif_time
+        suffix = path.suffix.lower()
+        # First, try to get EXIF datetime for photos
+        if suffix in SUPPORTED_IMAGES:
+            exif_time = get_exif_datetime(path)
+            if exif_time > 0:
+                return exif_time
+        # Then, try video metadata for videos
+        if suffix in SUPPORTED_VIDEOS:
+            video_time = get_video_creation_time(path)
+            if video_time > 0:
+                return video_time
 
         # Fall back to filesystem timestamps
         stat = path.stat()
@@ -123,6 +291,114 @@ def get_exif_gps(path):
 
         return (lat, lon) if lat and lon else None
     except: return None
+
+def parse_iso6709(iso_str):
+    """Parse ISO 6709 format: +DD.DDDD+DDD.DDDD[+DDD.DDD]/
+    Returns (lat, lon) or None."""
+    if not iso_str:
+        return None
+    try:
+        # Remove trailing /
+        iso_str = str(iso_str).rstrip('/')
+        # Pattern: +/-latitude +/-longitude [+/-altitude]
+        # Use regex to extract the three parts
+        m = re.match(r'([+-]?\d+\.?\d*)([+-]\d+\.?\d*)([+-]?\d+\.?\d*)?', iso_str)
+        if m:
+            lat = float(m.group(1))
+            lon = float(m.group(2))
+            return (lat, lon)
+    except:
+        pass
+    return None
+
+def get_video_gps(path):
+    """Extract GPS coordinates from video metadata using hachoir and MediaInfo."""
+    gps_candidates = []  # list of (source, lat, lon, raw_values)
+
+    # Try hachoir first
+    if HACHOIR_AVAILABLE:
+        try:
+            parser = createParser(str(path))
+            if parser:
+                metadata = extractMetadata(parser)
+                if metadata:
+                    lat = None
+                    lon = None
+                    hachoir_data = []
+                    for line in metadata.exportPlaintext():
+                        line_lower = line.lower()
+                        hachoir_data.append(line)
+                        if 'latitude' in line_lower and ':' in line:
+                            try:
+                                parts = line.split(':', 1)
+                                if len(parts) == 2:
+                                    lat_str = parts[1].strip().replace('+', '')
+                                    lat = float(lat_str)
+                            except:
+                                pass
+                        if 'longitude' in line_lower and ':' in line:
+                            try:
+                                parts = line.split(':', 1)
+                                if len(parts) == 2:
+                                    lon_str = parts[1].strip().replace('+', '')
+                                    lon = float(lon_str)
+                            except:
+                                pass
+                    if lat or lon:\
+                        gps_candidates.append(('hachoir', lat, lon, hachoir_data))
+                    else:
+                        gps_candidates.append(('hachoir', None, None, hachoir_data))
+                parser.stream._input.close()
+        except:
+            pass
+
+    # Try MediaInfo next
+    if MEDIAINFO_AVAILABLE:
+        try:
+            mi = MediaInfo.parse(path)
+            if mi and mi.tracks:
+                mediainfo_data = []
+                lat = None
+                lon = None
+                for track in mi.tracks:
+                    data = track.to_data() if hasattr(track, 'to_data') else {}
+                    # Collect all metadata
+                    for key, val in data.items():
+                        if val:
+                            mediainfo_data.append(f"{key}: {val}")
+                            # Look for GPS fields
+                            key_lower = key.lower()
+                            # Check for ISO 6709 format (com.apple.quicktime.locationiso6709)
+                            if 'iso6709' in key_lower:
+                                iso_coords = parse_iso6709(val)
+                                if iso_coords:
+                                    lat, lon = iso_coords
+                            if 'latitude' in key_lower or 'lat' in key_lower:
+                                try:
+                                    if isinstance(val, (list, tuple)):
+                                        lat = float(val[0])
+                                    else:
+                                        lat = float(val)
+                                except:
+                                    pass
+                            if 'longitude' in key_lower or 'lon' in key_lower:
+                                try:
+                                    if isinstance(val, (list, tuple)):
+                                        lon = float(val[0])
+                                    else:
+                                        lon = float(val)
+                                except:
+                                    pass
+                if lat or lon or mediainfo_data:
+                    gps_candidates.append(('mediainfo', lat, lon, mediainfo_data))
+        except:
+            pass
+
+    # Return first with actual coordinates
+    for _, lat, lon, _ in gps_candidates:
+        if lat and lon:
+            return (lat, lon)
+    return None
 
 def reverse_geocode_nominatim(lat, lon):
     """Reverse geocode using OpenStreetMap Nominatim API. Returns formatted address or None."""
@@ -224,6 +500,10 @@ class TimestampSlider(QSlider):
 class PVAnnotator(QWidget):
     def __init__(self,start_path=None):
         super().__init__()
+        # Set white background for the main widget
+        self.setStyleSheet("QWidget { background-color: white; }")
+        # Silence noisy Qt multimedia/ffmpeg logging in the console
+        QLoggingCategory.setFilterRules("qt.multimedia.*=false\nqt.multimedia.ffmpeg*=false")
         self.setWindowTitle("PVA Photo Video Annotator")
         self.setGeometry(QApplication.primaryScreen().availableGeometry())
         self.showMaximized()
@@ -236,6 +516,11 @@ class PVAnnotator(QWidget):
         self.image_label=QLabel(alignment=Qt.AlignCenter)
         self.image_label.setStyleSheet("background-color: white;")
         self.prev_btn=QPushButton("Previous")
+        self.position_box=QLineEdit()
+        self.position_box.setFixedWidth(120)
+        self.position_box.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
+        self.position_box.setAlignment(Qt.AlignCenter)
+        self.position_box.editingFinished.connect(self.jump_to_position)
         self.skip_btn=QPushButton("Skip")
         self.trash_btn=QPushButton("Set Aside")
         self.rotate_btn=QPushButton("Rotate clockwise")
@@ -276,7 +561,12 @@ class PVAnnotator(QWidget):
         self.text_scroll_timer.timeout.connect(self.scroll_annotation_text)
         self.text_scroll_pos = 0
 
-        self.video_widget=QVideoWidget(); self.video_widget.setStyleSheet("background-color: white;")
+        self.video_widget=QVideoWidget()
+        self.video_widget.setStyleSheet("QVideoWidget { background-color: white; }")
+        # Also set palette
+        palette = self.video_widget.palette()
+        palette.setColor(self.video_widget.backgroundRole(), QColor("white"))
+        self.video_widget.setPalette(palette)
         self.video_player=QMediaPlayer()  # Qt6 disables hw accel by default
         self.audio_output=QAudioOutput()
         self.video_player.setAudioOutput(self.audio_output)
@@ -311,7 +601,7 @@ class PVAnnotator(QWidget):
         layout.addLayout(video_btn_layout)
         button_layout=QHBoxLayout()
         button_layout.setSpacing(2)
-        for b in [self.prev_btn,self.skip_btn,self.trash_btn,self.rotate_btn,self.volume_btn,self.slide_btn]: button_layout.addWidget(b)
+        for b in [self.prev_btn,self.position_box,self.skip_btn,self.trash_btn,self.rotate_btn,self.volume_btn,self.slide_btn]: button_layout.addWidget(b)
         button_layout.addWidget(self.image_time_input)
         button_layout.addWidget(self.next_btn)
         layout.addLayout(button_layout)
@@ -349,6 +639,8 @@ class PVAnnotator(QWidget):
         if self.json_path.exists():
             self.data=json.loads(self.json_path.read_text())
         else: self.data={"_settings":{"font_size":DEFAULT_FONT_SIZE,"image_time":DEFAULT_IMAGE_TIME}}
+        # Normalize any stored creation times to the new string format
+        self.normalize_creation_times()
         self.check_and_prompt_folders()
         # Get all media files
         all_files = list(self.get_all_media_files())
@@ -380,6 +672,23 @@ class PVAnnotator(QWidget):
         self.show_item()
 
     # ---------------- Helpers ----------------
+    def normalize_creation_times(self):
+        """Convert any numeric/legacy creation times to the saved string format."""
+        changed = False
+        for name, entry in self.data.items():
+            if name == "_settings" or not isinstance(entry, dict):
+                continue
+            for key in ("creation_time", "creation_time_manual"):
+                if key in entry:
+                    ts = parse_creation_value(entry[key])
+                    if ts is not None:
+                        formatted = format_creation_timestamp(ts)
+                        if entry[key] != formatted:
+                            entry[key] = formatted
+                            changed = True
+        if changed:
+            self.save()
+
     def current(self): return self.media[self.index]
 
     def get_cached_creation_time(self, file_path):
@@ -389,11 +698,15 @@ class PVAnnotator(QWidget):
 
         # Check for manually set creation time first (takes precedence)
         if "creation_time_manual" in entry:
-            return entry["creation_time_manual"]
+            manual_ts = parse_creation_value(entry["creation_time_manual"])
+            if manual_ts is not None:
+                return manual_ts
 
         # Check if we have cached creation time (skip if null)
         if "creation_time" in entry and entry["creation_time"] is not None:
-            return entry["creation_time"]
+            cached_ts = parse_creation_value(entry["creation_time"])
+            if cached_ts is not None:
+                return cached_ts
 
         # Get from filesystem and cache it
         creation_time = get_file_creation_time(file_path)
@@ -403,16 +716,18 @@ class PVAnnotator(QWidget):
             default_date = datetime(2100, 1, 1, 0, 10, 0).timestamp()
             creation_time = default_date
 
-        entry["creation_time"] = creation_time
+        entry["creation_time"] = format_creation_timestamp(creation_time)
         return creation_time
 
     def validate_datetime(self, dt_string):
-        """Validate and convert YYYY-MM-DD HH:MM:SS format to Unix timestamp."""
-        try:
-            dt_obj = datetime.strptime(dt_string.strip(), "%Y-%m-%d %H:%M:%S")
-            return dt_obj.timestamp()
-        except ValueError:
-            return None
+        """Validate and convert YYYY/MM/DD HH:MM:SS (or legacy YYYY-MM-DD) to Unix timestamp."""
+        for fmt in (DATETIME_FMT, LEGACY_DATETIME_FMT):
+            try:
+                dt_obj = datetime.strptime(dt_string.strip(), fmt)
+                return dt_obj.timestamp()
+            except ValueError:
+                continue
+        return None
 
     def get_relative_path(self, file_path):
         """Get relative path from self.dir for display, e.g., 'France/photo.jpg'."""
@@ -420,6 +735,25 @@ class PVAnnotator(QWidget):
             return str(file_path.relative_to(self.dir))
         except ValueError:
             return file_path.name
+
+    def get_visible_media(self):
+        """Return media entries not marked as skipped."""
+        return [p for p in self.media if not self.data.get(p.name, {}).get("skip", False)]
+
+    def update_position_display(self):
+        visible = self.get_visible_media()
+        total = len(visible)
+        if total == 0:
+            text = "0 of 0"
+        else:
+            try:
+                current_visible_index = visible.index(self.current()) + 1
+            except ValueError:
+                current_visible_index = 1
+            text = f"{current_visible_index} of {total}"
+        self.position_box.blockSignals(True)
+        self.position_box.setText(text)
+        self.position_box.blockSignals(False)
 
     def save(self):
         # Build a fast lookup set of video filenames for O(1) lookup
@@ -471,9 +805,6 @@ class PVAnnotator(QWidget):
     def extract_and_store_location(self, file_path):
         """Extract GPS coordinates from media file and reverse geocode if available."""
         p = self.current()
-        if p.suffix.lower() not in SUPPORTED_IMAGES:
-            return
-
         entry = self.data.setdefault(p.name, {})
         location = entry.setdefault("location", {})
 
@@ -481,9 +812,17 @@ class PVAnnotator(QWidget):
         if "automated_text" in location:
             return
 
-        # Extract GPS from EXIF if not already present
+        # Extract GPS from EXIF (images) or metadata (videos) if not already present
         if "latitude_longitude" not in location:
-            gps = get_exif_gps(file_path)
+            # Try image EXIF first
+            if p.suffix.lower() in SUPPORTED_IMAGES:
+                gps = get_exif_gps(file_path)
+            # Try video metadata
+            elif p.suffix.lower() in SUPPORTED_VIDEOS:
+                gps = get_video_gps(file_path)
+            else:
+                gps = None
+
             if not gps:
                 return
 
@@ -512,7 +851,7 @@ class PVAnnotator(QWidget):
 
         # Use cached creation time for display
         creation_time = self.get_cached_creation_time(p)
-        ts=datetime.fromtimestamp(creation_time).strftime("%Y-%m-%d %H:%M:%S")
+        ts=format_creation_timestamp(creation_time)
 
         # Update datetime box (editable)
         self.datetime_box.blockSignals(True)
@@ -525,6 +864,9 @@ class PVAnnotator(QWidget):
         self.filename_label.setText(display_path)
         self.filename_label.setCursorPosition(0)  # Keep cursor at start to show beginning of path
         self.filename_label.blockSignals(False)
+
+        # Update position display (1-based, non-skipped)
+        self.update_position_display()
 
         # Dropdown locations
         manual_locations=list({self.data[f].get("location",{}).get("manual_text","") for f in self.data if "location" in self.data[f]})
@@ -574,9 +916,9 @@ class PVAnnotator(QWidget):
             # Use a single-shot timer to allow the source to load before playing
             QTimer.singleShot(100, self.video_player.play)
 
-        # Next/Prev labels
-        self.prev_btn.setText("Jump to last" if self.index==0 else "Previous")
-        self.next_btn.setText("Back to first" if self.index==len(self.media)-1 else "Next")
+        # Next/Prev labels stay constant now that position box exists
+        self.prev_btn.setText("Previous")
+        self.next_btn.setText("Next")
         self.save()
 
     # ---------------- Video Annotation ----------------
@@ -829,10 +1171,10 @@ class PVAnnotator(QWidget):
         # Validate the format
         timestamp = self.validate_datetime(text)
         if timestamp is None:
-            QMessageBox.warning(self, "Invalid Format", "Please use YYYY-MM-DD HH:MM:SS format (e.g., 2024-12-31 14:30:00)")
+            QMessageBox.warning(self, "Invalid Format", "Please use YYYY/MM/DD HH:MM:SS (e.g., 2024/12/31 14:30:00)")
             # Reset to current value
             creation_time = self.get_cached_creation_time(p)
-            ts = datetime.fromtimestamp(creation_time).strftime("%Y-%m-%d %H:%M:%S")
+            ts = format_creation_timestamp(creation_time)
             self.datetime_box.blockSignals(True)
             self.datetime_box.setText(ts)
             self.datetime_box.blockSignals(False)
@@ -840,7 +1182,7 @@ class PVAnnotator(QWidget):
 
         # Save the manual creation time
         entry = self.data.setdefault(p.name, {})
-        entry["creation_time_manual"] = timestamp
+        entry["creation_time_manual"] = format_creation_timestamp(timestamp)
         self.save()
 
         # Re-sort media list with new time
@@ -882,6 +1224,32 @@ class PVAnnotator(QWidget):
         self.image_time_input.setText(f"{time_str} {time_text}")
 
     # ---------------- Navigation ----------------
+    def jump_to_position(self):
+        """Jump to a 1-based position within non-skipped media."""
+        visible = self.get_visible_media()
+        total = len(visible)
+        if total == 0:
+            self.update_position_display()
+            return
+
+        raw = self.position_box.text().split('of')[0].strip()
+        try:
+            target = int(raw)
+        except ValueError:
+            self.update_position_display()
+            return
+
+        target = max(1, min(total, target))
+        # Update display with clamped value
+        self.position_box.blockSignals(True)
+        self.position_box.setText(f"{target} of {total}")
+        self.position_box.blockSignals(False)
+
+        target_path = visible[target - 1]
+        if target_path in self.media:
+            self.index = self.media.index(target_path)
+            self.show_item()
+
     def next_item(self):
         self.index=(self.index+1)%len(self.media)
         # Skip over any files marked as skip=true
@@ -1072,7 +1440,17 @@ class PVAnnotator(QWidget):
         else: super().keyPressEvent(event)
 
 if __name__=="__main__":
+    # Suppress FFmpeg's stderr output (AAC codec warnings, etc.)
+    devnull = open(os.devnull, 'w')
+    old_stderr = sys.stderr
+    sys.stderr = devnull
+
     app=QApplication(sys.argv)
+
+    # Restore stderr after Qt initialization
+    sys.stderr = old_stderr
+    devnull.close()
+
     start_path=sys.argv[1] if len(sys.argv)>1 else None
     w=PVAnnotator(start_path)
     w.show()
