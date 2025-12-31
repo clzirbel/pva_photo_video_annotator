@@ -211,7 +211,7 @@ class PVAnnotator(QWidget):
         self.volume_btn=QPushButton("100% volume")
         self.slide_btn=QPushButton("Slideshow")
         self.image_time_input=QLineEdit()
-        self.image_time_input.setFixedWidth(88)
+        self.image_time_input.setFixedWidth(97)
         self.image_time_input.setFont(QFont("Arial",12))
         self.image_time_input.setAlignment(Qt.AlignLeft)
         self.image_time_input.setText(f"{DEFAULT_IMAGE_TIME} seconds")
@@ -227,8 +227,12 @@ class PVAnnotator(QWidget):
                     (self.rotate_btn,self.rotate_item),(self.volume_btn,self.change_volume),
                     (self.slide_btn,self.toggle_slideshow)]: b.clicked.connect(f)
 
-        self.meta_label=QLabel(); self.meta_label.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
-        self.meta_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.datetime_box=QLineEdit(); self.datetime_box.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
+        self.datetime_box.editingFinished.connect(self.update_creation_time)
+        self.datetime_box.setReadOnly(False)  # Editable by user
+        self.filename_label=QLineEdit(); self.filename_label.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
+        self.filename_label.setReadOnly(True)  # Read-only display
+        self.filename_label.setAlignment(Qt.AlignLeft)  # Left-justify text
         self.location_combo=QComboBox(); self.location_combo.setEditable(True)
         self.location_combo.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
         self.location_combo.currentTextChanged.connect(self.update_location_text)
@@ -282,7 +286,7 @@ class PVAnnotator(QWidget):
         layout.addLayout(button_layout)
         meta_layout=QHBoxLayout()
         meta_layout.setSpacing(2)
-        meta_layout.addWidget(self.meta_label,3); meta_layout.addWidget(self.location_combo,2)
+        meta_layout.addWidget(self.datetime_box,3); meta_layout.addWidget(self.filename_label,10); meta_layout.addWidget(self.location_combo,7)
         layout.addLayout(meta_layout)
         layout.addWidget(self.text_box)
 
@@ -315,8 +319,18 @@ class PVAnnotator(QWidget):
             self.data=json.loads(self.json_path.read_text())
         else: self.data={"_settings":{"font_size":DEFAULT_FONT_SIZE,"image_time":DEFAULT_IMAGE_TIME}}
         self.check_and_prompt_folders()
-        self.media=sorted([p for p in self.get_all_media_files()],
-                          key=lambda p: get_file_creation_time(p))
+        # Get all media files
+        all_files = list(self.get_all_media_files())
+        # Cache creation times for new files (batch operation)
+        needs_save = False
+        for file_path in all_files:
+            if file_path.name not in self.data or "creation_time" not in self.data.get(file_path.name, {}):
+                self.get_cached_creation_time(file_path)
+                needs_save = True
+        if needs_save:
+            self.save()
+        # Sort using cached creation times
+        self.media=sorted(all_files, key=lambda p: self.get_cached_creation_time(p))
         if start_path and start_path.is_file() and start_path in self.media:
             self.index=self.media.index(start_path)
         # Sort video annotations
@@ -325,11 +339,43 @@ class PVAnnotator(QWidget):
                 entry["annotations"]=sorted(entry["annotations"],key=lambda a: a["time"])
         # Update image time display
         image_time = self.get_image_time()
-        self.image_time_input.setText(f"{image_time} seconds")
+        time_text = "second" if image_time == 1 else "seconds"
+        # Format: show integers without decimal, floats with decimal
+        if image_time == int(image_time):
+            time_str = str(int(image_time))
+        else:
+            time_str = str(image_time)
+        self.image_time_input.setText(f"{time_str} {time_text}")
         self.show_item()
 
     # ---------------- Helpers ----------------
     def current(self): return self.media[self.index]
+
+    def get_cached_creation_time(self, file_path):
+        """Get creation time from cache or filesystem, updating cache if needed."""
+        filename = file_path.name
+        entry = self.data.setdefault(filename, {})
+
+        # Check for manually set creation time first (takes precedence)
+        if "creation_time_manual" in entry:
+            return entry["creation_time_manual"]
+
+        # Check if we have cached creation time
+        if "creation_time" in entry:
+            return entry["creation_time"]
+
+        # Get from filesystem and cache it
+        creation_time = get_file_creation_time(file_path)
+        entry["creation_time"] = creation_time
+        return creation_time
+
+    def validate_datetime(self, dt_string):
+        """Validate and convert YYYY-MM-DD HH:MM:SS format to Unix timestamp."""
+        try:
+            dt_obj = datetime.strptime(dt_string.strip(), "%Y-%m-%d %H:%M:%S")
+            return dt_obj.timestamp()
+        except ValueError:
+            return None
 
     def get_relative_path(self, file_path):
         """Get relative path from self.dir for display, e.g., 'France/photo.jpg'."""
@@ -427,9 +473,21 @@ class PVAnnotator(QWidget):
         # Extract location data if available
         self.extract_and_store_location(p)
 
-        ts=datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d | %H:%M:%S")
+        # Use cached creation time for display
+        creation_time = self.get_cached_creation_time(p)
+        ts=datetime.fromtimestamp(creation_time).strftime("%Y-%m-%d %H:%M:%S")
+
+        # Update datetime box (editable)
+        self.datetime_box.blockSignals(True)
+        self.datetime_box.setText(ts)
+        self.datetime_box.blockSignals(False)
+
+        # Update filename label (read-only)
         display_path = self.get_relative_path(p)
-        self.meta_label.setText(f"{ts} | {display_path}")
+        self.filename_label.blockSignals(True)
+        self.filename_label.setText(display_path)
+        self.filename_label.setCursorPosition(0)  # Keep cursor at start to show beginning of path
+        self.filename_label.blockSignals(False)
 
         # Dropdown locations
         manual_locations=list({self.data[f].get("location",{}).get("manual_text","") for f in self.data if "location" in self.data[f]})
@@ -726,27 +784,65 @@ class PVAnnotator(QWidget):
         self.data.setdefault(p.name,{}).setdefault("location",{})["manual_text"]=text
         self.save()
 
+    def update_creation_time(self):
+        """Parse and validate the user-edited creation time."""
+        p = self.current()
+        text = self.datetime_box.text().strip()
+
+        # Validate the format
+        timestamp = self.validate_datetime(text)
+        if timestamp is None:
+            QMessageBox.warning(self, "Invalid Format", "Please use YYYY-MM-DD HH:MM:SS format (e.g., 2024-12-31 14:30:00)")
+            # Reset to current value
+            creation_time = self.get_cached_creation_time(p)
+            ts = datetime.fromtimestamp(creation_time).strftime("%Y-%m-%d %H:%M:%S")
+            self.datetime_box.blockSignals(True)
+            self.datetime_box.setText(ts)
+            self.datetime_box.blockSignals(False)
+            return
+
+        # Save the manual creation time
+        entry = self.data.setdefault(p.name, {})
+        entry["creation_time_manual"] = timestamp
+        self.save()
+
+        # Re-sort media list with new time
+        self.media = sorted(self.media, key=lambda path: self.get_cached_creation_time(path))
+        self.index = self.media.index(p) if p in self.media else 0
+        self.show_item()
+
     def update_image_time(self):
         """Parse image time input and save to settings."""
         text = self.image_time_input.text()
         # Extract numbers from the text, split by spaces, take first number
         words = text.split()
         for word in words:
-            # Strip out non-numeric characters
-            num_str = ''.join(c for c in word if c.isdigit())
-            if num_str:
+            # Strip out non-numeric characters except decimal point
+            num_str = ''.join(c for c in word if c.isdigit() or c == '.')
+            if num_str and num_str != '.':
                 try:
-                    new_time = int(num_str)
+                    new_time = float(num_str)
                     if new_time > 0:
                         self.data.setdefault("_settings", {})["image_time"] = new_time
-                        self.image_time_input.setText(f"{new_time} seconds")
+                        time_text = "second" if new_time == 1 else "seconds"
+                        # Format: show integers without decimal, floats with decimal
+                        if new_time == int(new_time):
+                            time_str = str(int(new_time))
+                        else:
+                            time_str = str(new_time)
+                        self.image_time_input.setText(f"{time_str} {time_text}")
                         self.save()
                         return
                 except ValueError:
                     pass
         # If no valid number found, reset to current value
         current_time = self.get_image_time()
-        self.image_time_input.setText(f"{current_time} seconds")
+        time_text = "second" if current_time == 1 else "seconds"
+        if current_time == int(current_time):
+            time_str = str(int(current_time))
+        else:
+            time_str = str(current_time)
+        self.image_time_input.setText(f"{time_str} {time_text}")
 
     # ---------------- Navigation ----------------
     def next_item(self):
@@ -835,18 +931,28 @@ class PVAnnotator(QWidget):
         if self.slideshow:
             self.slide_btn.setText("Stop slideshow")
             p=self.current()
+            image_time = self.get_image_time()
+            image_time_ms = int(image_time * 1000)
             if p.suffix.lower() in SUPPORTED_VIDEOS:
                 # For videos, get duration and set timer to that
-                dur_ms = get_video_duration_ms(p)
-                if dur_ms and dur_ms > 0:
-                    self.timer.start(dur_ms)
+                # But if image_time <= 1 second, use image_time to allow fast navigation
+                if image_time <= 1:
+                    self.timer.start(image_time_ms)
                 else:
-                    self.timer.start(self.get_image_time()*1000)
+                    dur_ms = get_video_duration_ms(p)
+                    if dur_ms and dur_ms > 0:
+                        self.timer.start(dur_ms)
+                    else:
+                        self.timer.start(image_time_ms)
             else:
-                # For images, use the image time and start text scrolling if needed
-                duration=max(self.get_image_time(),len(self.text_box.toPlainText().split())/4)*1000
-                self.timer.start(int(duration))
-                self.start_text_scroll(int(duration))
+                # For images, use word count timing only if delay > 1 second
+                if image_time > 1:
+                    duration=max(image_time,len(self.text_box.toPlainText().split())/4)*1000
+                    self.timer.start(int(duration))
+                    self.start_text_scroll(int(duration))
+                else:
+                    # Fast navigation mode: fixed delay time, no text scrolling
+                    self.timer.start(image_time_ms)
         else:
             self.slide_btn.setText("Slideshow")
             self.timer.stop()
@@ -858,18 +964,28 @@ class PVAnnotator(QWidget):
         self.next_item()
         # Now set timer for the newly loaded item
         p=self.current()
+        image_time = self.get_image_time()
+        image_time_ms = int(image_time * 1000)
         if p.suffix.lower() in SUPPORTED_IMAGES:
-            duration=max(self.get_image_time(),len(self.text_box.toPlainText().split())/4)*1000
-            self.timer.start(int(duration))
-            self.start_text_scroll(int(duration))
+            # For images, use word count timing only if delay > 1 second
+            if image_time > 1:
+                duration=max(image_time,len(self.text_box.toPlainText().split())/4)*1000
+                self.timer.start(int(duration))
+                self.start_text_scroll(int(duration))
+            else:
+                # Fast navigation mode: fixed delay time, no text scrolling
+                self.timer.start(image_time_ms)
         else:
             # For videos, get duration and set timer to that
-            dur_ms = get_video_duration_ms(p)
-            if dur_ms and dur_ms > 0:
-                self.timer.start(dur_ms)
+            # But if image_time <= 1 second, use image_time to allow fast navigation
+            if image_time <= 1:
+                self.timer.start(image_time_ms)
             else:
-                self.timer.start(self.get_image_time()*1000)
-        if self.index==0: self.timer.start(self.get_image_time()*1000)
+                dur_ms = get_video_duration_ms(p)
+                if dur_ms and dur_ms > 0:
+                    self.timer.start(dur_ms)
+                else:
+                    self.timer.start(image_time_ms)
 
     def start_text_scroll(self, duration_ms):
         """Start scrolling text if it has more than 3 lines during slideshow."""
