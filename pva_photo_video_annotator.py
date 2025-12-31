@@ -238,7 +238,7 @@ class PVAnnotator(QWidget):
         self.prev_btn=QPushButton("Previous")
         self.skip_btn=QPushButton("Skip")
         self.trash_btn=QPushButton("Set Aside")
-        self.rotate_btn=QPushButton("Rotate")
+        self.rotate_btn=QPushButton("Rotate clockwise")
         self.volume_btn=QPushButton("100% volume")
         self.slide_btn=QPushButton("Slideshow")
         self.image_time_input=QLineEdit()
@@ -569,7 +569,7 @@ class PVAnnotator(QWidget):
             self.rotate_btn.show()
             self.volume_btn.hide()
             self.image_label.show()
-            rot=entry.get("rotation",get_exif_rotation(p))
+            rot=entry.get("rotation",0)
             qimg=load_image(p,rot)
             pix=QPixmap.fromImage(qimg)
             self.image_label.setPixmap(pix.scaled(800,600,Qt.KeepAspectRatio))
@@ -930,8 +930,8 @@ class PVAnnotator(QWidget):
 
         entry=self.data.setdefault(p.name,{})
         current_rotation=entry.get("rotation",0)
-        # Cycle through 0, 90, 180, 270
-        new_rotation=(current_rotation+90)%360
+        # Cycle through 0, 270, 180, 90 (clockwise)
+        new_rotation=(current_rotation-90)%360
         # Store rotation only if not 0 (default)
         if new_rotation==0:
             entry.pop("rotation",None)
