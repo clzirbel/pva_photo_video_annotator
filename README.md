@@ -17,12 +17,27 @@ A simple yet powerful tool for viewing, organizing, and annotating photos and vi
 
 ## Getting Started
 
-### Requirements
+### Quick Start: Windows Executable (Recommended)
+
+The easiest way to get started is to download the pre-built Windows executable:
+
+1. Go to the [Releases](https://github.com/yourusername/pva_photo_video_annotator/releases) page
+2. Download the latest `PVA Photo and Video Annotator.exe` file
+3. Run the `.exe` file directly - **no Python installation required**
+4. Select a folder with your photos and videos to begin annotating
+
+The executable runs on any Windows machine without requiring Python or any additional setup.
+
+### Alternative: Run as Python Project
+
+If you prefer to run the application as a Python project (for development or customization), follow these steps:
+
+#### Requirements
 
 - **Python 3.8 or higher** (tested with Python 3.11)
 - All required packages are listed in `requirements.txt`
 
-### Installation
+#### Installation
 
 1. **Clone the repository:**
    ```bash
@@ -106,7 +121,10 @@ Use the **Next** and **Previous** buttons to navigate through your media files o
 - **Next**: Moves to the next media file in the folder. If you're at the last file, it wraps back to the first.
 - **Previous**: Moves to the previous media file. If you're at the first file, it wraps back to the last.
 - **File Display**: The filename is shown with its relative path, so files in subfolders appear as `SubfolderName/filename.jpg`
-- **Sort Order**: Files are sorted by creation date, not modification date, so they display in the order they were taken
+- **Sort Order**: Files are sorted by creation date, which is determined intelligently:
+  - For photos: EXIF datetime is used (the actual date the photo was taken)
+  - For files without EXIF data: The earliest filesystem timestamp is used (handles Google Photos and other downloaded files correctly)
+  - You can manually edit any creation date by clicking on the date field and entering a new date in `YYYY-MM-DD HH:MM:SS` format
 
 When you navigate to a video, it will automatically start playing.
 
@@ -262,6 +280,19 @@ All annotations, metadata, and preferences are stored in a JSON file (`annotatio
 - Share annotations with others
 - Edit annotations manually if needed
 - Use the annotations with other tools
+
+### Date and Time Handling
+
+The application intelligently determines creation dates for your media files:
+
+- **EXIF DateTime Priority**: For photos with EXIF metadata, the `DateTimeOriginal` tag is used. This is the most accurate representation of when the photo was actually taken.
+- **Filesystem Timestamp Fallback**: For files without EXIF data or videos, the earliest available filesystem timestamp is used (choosing between creation time, modification time, or birth time). This ensures proper sorting even for downloaded files from Google Photos or other sources.
+- **Manual Override**: You can manually edit any file's creation date by clicking the date field and entering a new date in `YYYY-MM-DD HH:MM:SS` format. This override takes precedence over all automatic detection.
+- **Storage**: Automatic dates are cached in the JSON for performance. Manual dates are stored separately and always used when available.
+
+This approach ensures that files are always sorted in the order they were taken, regardless of whether they were downloaded, emailed, or copied to your collection.
+
+### File Entries
 
 Each media file gets an entry in the JSON with:
 - `text`: Text annotation (images) or time-stamped annotations (videos)
