@@ -354,24 +354,10 @@ class PVAnnotator(QWidget):
         all_files = list(self.get_all_media_files())
         # Cache creation times for new files (batch operation)
         needs_save = False
-
-        # Show progress dialog during extraction
-        progress = QProgressDialog("Finding original dates for media files...", None, 0, len(all_files), self)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setWindowTitle("Extracting Metadata")
-        progress.show()
-
-        for i, file_path in enumerate(all_files):
+        for file_path in all_files:
             if file_path.name not in self.data or "creation_time" not in self.data.get(file_path.name, {}):
                 self.get_cached_creation_time(file_path)
                 needs_save = True
-            # Update progress dialog
-            progress.setValue(i + 1)
-            progress.setLabelText(f"Finding original dates for media files...\n({i + 1} of {len(all_files)})")
-            QApplication.processEvents()  # Allow UI to update
-
-        progress.close()
-
         if needs_save:
             self.save()
         # Sort using cached creation times
