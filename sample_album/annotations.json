@@ -1,0 +1,93 @@
+{
+  "_settings": {
+    "font_size": 14,
+    "image_time": 5
+  },
+  "PXL_20251015_220836835.jpg": {
+    "rotation": 90,
+    "text": "Spiral aloe plant in a yard.",
+    "location": {
+      "latitude_longitude": {
+        "latitude": 37.83261,
+        "longitude": -122.25941
+      },
+      "automated_text": "Oakland, California, United States"
+    }
+  },
+  "PXL_20251018_223427037.jpg": {
+    "rotation": 0,
+    "text": "Golden Gate Bridge from outside the Bay, taken on a boat tour to the Farallon Islands west of San Francisco.",
+    "location": {
+      "latitude_longitude": {
+        "latitude": 37.81024,
+        "longitude": -122.48136
+      },
+      "automated_text": "San Francisco, California, United States"
+    }
+  },
+  "PXL_20250623_004528789.jpg": {
+    "rotation": 0,
+    "text": "",
+    "location": {
+      "latitude_longitude": {
+        "latitude": 36.62189,
+        "longitude": -121.94108
+      },
+      "automated_text": "Pacific Grove, California, United States"
+    }
+  },
+  "PXL_20250601_222146140.jpg": {
+    "rotation": 0,
+    "text": "Iconic location for taking pictures of the Golden Gate Bridge.  San Francisco is in the background, but the fog makes it hard to see.",
+    "location": {
+      "latitude_longitude": {
+        "latitude": 37.82751,
+        "longitude": -122.48138
+      },
+      "automated_text": "California, United States"
+    }
+  },
+  "PXL_20230728_175225112.mp4": {
+    "text": "",
+    "annotations": [
+      {
+        "time": 0.0,
+        "text": "Driving into Big Basin State Park in July 2023"
+      },
+      {
+        "time": 5.709,
+        "text": "Skipping in two seconds",
+        "skip": false
+      },
+      {
+        "time": 7.709,
+        "text": "Segment skipped",
+        "skip": true
+      },
+      {
+        "time": 11.202,
+        "text": "Left turn coming up"
+      },
+      {
+        "time": 17.154,
+        "text": "Right turn coming up"
+      },
+      {
+        "time": 19.626,
+        "text": "People live along here"
+      },
+      {
+        "time": 33.305,
+        "text": "Skip to end of video in two seconds"
+      },
+      {
+        "time": 36.08,
+        "text": "Segment skipped",
+        "skip": true
+      }
+    ],
+    "location": {
+      "manual_text": "Big Basin park, California, United States"
+    }
+  }
+}
