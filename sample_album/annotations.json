@@ -56,8 +56,7 @@
       },
       {
         "time": 5.709,
-        "text": "Skipping in two seconds",
-        "skip": false
+        "text": "Skipping forward in two seconds"
       },
       {
         "time": 7.709,
@@ -89,5 +88,83 @@
     "location": {
       "manual_text": "Big Basin park, California, United States"
     }
+  },
+  "France": {
+    "use": true
+  },
+  "PXL_20230322_131809544.MP.jpg": {
+    "rotation": 0,
+    "text": "The Mediterranean coast near Marseille",
+    "location": {
+      "latitude_longitude": {
+        "latitude": 43.21267,
+        "longitude": 5.4563
+      },
+      "automated_text": "Marseille, Provence-Alpes-C\u00f4te d'Azur, France"
+    }
+  },
+  "PXL_20230324_155705728.jpg": {
+    "rotation": 0,
+    "text": "A mural in Marseille",
+    "location": {
+      "latitude_longitude": {
+        "latitude": 43.29849,
+        "longitude": 5.36657
+      },
+      "automated_text": "Marseille, Provence-Alpes-C\u00f4te d'Azur, France"
+    }
+  },
+  "PXL_20230328_135543810.jpg": {
+    "rotation": 0,
+    "text": "Typical look of a village in Alsace\n2\n3\n4\n5\n6\n",
+    "location": {
+      "latitude_longitude": {
+        "latitude": 48.16731,
+        "longitude": 7.29921
+      },
+      "automated_text": "Riquewihr, Grand Est, France"
+    }
+  },
+  "PXL_20230331_090338930.jpg": {
+    "text": "",
+    "location": {
+      "latitude_longitude": {
+        "latitude": 48.58698,
+        "longitude": 7.75391
+      },
+      "automated_text": "Strasbourg, Grand Est, France"
+    }
+  },
+  "image_to_set_aside.png": {
+    "rotation": 0,
+    "text": "",
+    "location": {}
+  },
+  "image_to_set_aside_2.png": {
+    "rotation": 0,
+    "text": "",
+    "location": {}
+  },
+  "image_to_skip.gif": {
+    "rotation": 0,
+    "text": "",
+    "location": {},
+    "skip": true
+  },
+  "image_to_skip_2.gif": {
+    "rotation": 0,
+    "text": "",
+    "location": {},
+    "skip": true
+  },
+  "image_from_paint.gif": {
+    "rotation": 0,
+    "text": "",
+    "location": {}
+  },
+  "screen_grab.png": {
+    "rotation": 0,
+    "text": "",
+    "location": {}
   }
 }
