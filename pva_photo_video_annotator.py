@@ -1,4 +1,4 @@
-import sys, json, shutil, re
+import sys, json, shutil, re, calendar
 from pathlib import Path
 from datetime import datetime
 from bisect import bisect_right
@@ -35,7 +35,8 @@ LEGACY_DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
 
 def format_creation_timestamp(ts):
     """Format Unix timestamp to display/save format."""
-    return datetime.fromtimestamp(ts).strftime(DATETIME_FMT)
+    local_dt = datetime.fromtimestamp(ts)
+    return local_dt.strftime(DATETIME_FMT)
 
 def parse_creation_value(value):
     """Parse stored creation time value (string or number) into Unix timestamp."""
@@ -63,28 +64,59 @@ def parse_creation_value(value):
     return None
 
 def parse_datetime_string(dt_str):
-    """Parse various datetime string forms into timestamp. Returns None if unparsed."""
+    """Parse various datetime string forms into timestamp. Returns None if unparsed.
+    Handles both naive (local) and UTC-marked timestamps correctly by converting
+    UTC times to epoch using calendar.timegm()."""
     if not dt_str:
         return None
     if isinstance(dt_str, (list, tuple)) and dt_str:
         dt_str = dt_str[0]
     s = str(dt_str).strip()
-    # Common cleanups
+
+    # Detect if this is a UTC timestamp (before we strip the indicators)
+    is_utc = False
+    original_s = s
     if s.endswith('Z'):
         s = s[:-1] + '+00:00'
-    if s.endswith(' UTC'):
+        is_utc = True
+    elif s.endswith(' UTC'):
+        is_utc = True
         s = s[:-4]
-    if s.lower().startswith('utc '):
+    elif s.lower().startswith('utc '):
+        is_utc = True
         s = s[4:]
+
     # Try ISO first
     try:
-        return datetime.fromisoformat(s).timestamp()
+        dt_obj = datetime.fromisoformat(s)
+        # If timezone-aware, .timestamp() handles conversion correctly
+        # If naive and is_utc=True, use calendar.timegm to treat as UTC
+        if dt_obj.tzinfo is not None:
+            # Timezone-aware datetime
+            return dt_obj.timestamp()
+        elif is_utc:
+            # Naive datetime but marked as UTC
+            result = calendar.timegm(dt_obj.timetuple())
+            return result
+        else:
+            # Naive datetime, assume local
+            return dt_obj.timestamp()
     except Exception:
         pass
+
     # Try common fallback formats
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y/%m/%d %H:%M:%S"):
         try:
-            return datetime.strptime(s, fmt).timestamp()
+            dt_obj = datetime.strptime(s, fmt)
+            # If UTC was detected, interpret naive datetime as UTC time
+            # and convert to epoch using calendar.timegm (UTC conversion)
+            # This ensures the timestamp represents the correct moment in time
+            if is_utc:
+                result = calendar.timegm(dt_obj.timetuple())
+                return result
+            else:
+                # Naive datetime assumed to be local time (like EXIF)
+                return dt_obj.timestamp()
         except ValueError:
             continue
     return None
@@ -111,7 +143,9 @@ def parse_filename_datetime(path):
     return None
 
 def get_exif_datetime(path):
-    """Extract DateTimeOriginal from EXIF data. Returns Unix timestamp or 0 if not found."""
+    """Extract DateTimeOriginal from EXIF data as a string (naive local time).
+    Returns the string directly without any timezone conversion.
+    Format: "YYYY/MM/DD HH:MM:SS" or 0 if not found."""
     try:
         if path.suffix.lower() not in SUPPORTED_IMAGES:
             return 0
@@ -123,20 +157,25 @@ def get_exif_datetime(path):
         datetime_original = exif.get(36867)
         if datetime_original:
             # EXIF datetime format: "YYYY:MM:DD HH:MM:SS"
-            dt_obj = datetime.strptime(datetime_original, "%Y:%m:%d %H:%M:%S")
-            return dt_obj.timestamp()
+            # Convert to our display format, preserving the literal time
+            return datetime_original.replace(":", "/", 2)  # Only replace first 2 colons
     except:
         pass
     return 0
 
 def get_video_creation_time(path):
-    """Extract creation time for videos using MediaInfo (QuickTime/MP4 metadata)."""
+    """Extract creation time for videos using MediaInfo (QuickTime/MP4 metadata).
+    For MOV files: Uses timezone-aware creation date when available.
+    Returns tuple (epoch, display_string) for MOV files, or just epoch for other videos.
+    """
     if not MEDIAINFO_AVAILABLE:
         return 0
     try:
         mi = MediaInfo.parse(path)
     except Exception:
         mi = None
+
+    is_mov = ".mov" in str(path).lower()
 
     candidates = []  # list of tuples (source, raw_value, parsed_ts)
 
@@ -147,12 +186,22 @@ def get_video_creation_time(path):
 
     def candidate_times(track):
         data = track.to_data() if hasattr(track, 'to_data') else {}
+
         def add_field(key, label=None):
             val = data.get(key)
             if val:
                 add_candidate(label or key, val)
-        # QuickTime specific
+
+        # QuickTime specific - check for the creation date with timezone info FIRST
+        # Example: "2025-11-25T17:41:26+0700" (already has timezone!)
+        # Handle this WITHOUT calling parse_datetime_string to avoid debug spam
+        qt_date = data.get('comapplequicktimecreationdate')
+        if qt_date and is_mov:
+            # For MOV: add with special marker so we handle it separately
+            candidates.append(('comapplequicktimecreationdate', qt_date, None))
+
         add_field('com.apple.quicktime.creationdate', 'qt_creationdate')
+
         # Generic creation_time
         add_field('creation_time', 'creation_time')
         add_field('creation_time-eng', 'creation_time-eng')
@@ -194,41 +243,85 @@ def get_video_creation_time(path):
         pass
 
     # Choose first parsed in order we collected
-    for _, _, ts in candidates:
+    for source, raw, ts in candidates:
+        # Special handling for MOV timezone-aware dates
+        if source == 'comapplequicktimecreationdate' and isinstance(raw, str):
+            try:
+                # Format: "2025-11-25T17:41:26+0700" - already has timezone!
+                # Extract the local time (what was recorded) and epoch
+                dt_aware = datetime.fromisoformat(str(raw))
+                local_time = dt_aware.replace(tzinfo=None)
+                display = local_time.strftime("%Y/%m/%d %H:%M:%S")
+                correct_epoch = dt_aware.timestamp()
+                return (correct_epoch, display)
+            except Exception:
+                pass
+
+        # Standard path for other timestamps
         if ts:
+            # For MOV files, return tuple (epoch, display_string)
+            if is_mov and source != 'comapplequicktimecreationdate':
+                # Format the timestamp for MOV files
+                display = datetime.fromtimestamp(ts).strftime("%Y/%m/%d %H:%M:%S")
+                return (ts, display)
+            # For other videos, return just the epoch
             return ts
+
     return 0
 
 def get_file_creation_time(path):
-    """Get file creation time - prioritizes EXIF datetime, then uses earliest filesystem timestamp.
-    This corresponds to when the file was actually created/taken, not when it was downloaded or edited."""
+    """Get file creation time with proper timezone handling.
+    For images: EXIF is naive local time (return as string directly)
+    For videos: MediaInfo contains UTC times (return as epoch)
+    For filesystem: timestamps are UTC, convert to local display
+    Returns tuple: (sortable_epoch, display_string)
+    """
     try:
         suffix = path.suffix.lower()
-        # First, try to get EXIF datetime for photos
-        if suffix in SUPPORTED_IMAGES:
-            exif_time = get_exif_datetime(path)
-            if exif_time > 0:
-                return exif_time
-        # Then, try video metadata for videos
-        if suffix in SUPPORTED_VIDEOS:
-            video_time = get_video_creation_time(path)
-            if video_time > 0:
-                return video_time
 
-        # Fall back to filesystem timestamps
+        # For images: get EXIF datetime (naive local time stored as string)
+        if suffix in SUPPORTED_IMAGES:
+            exif_str = get_exif_datetime(path)
+            if exif_str and exif_str != 0:
+                # Parse it to get an epoch for sorting (treating string as naive/local)
+                dt_obj = datetime.strptime(exif_str, DATETIME_FMT)
+                sort_epoch = dt_obj.timestamp()
+                return (sort_epoch, exif_str)
+
+        # For videos: get MediaInfo metadata (UTC times converted to epoch)
+        if suffix in SUPPORTED_VIDEOS:
+            video_result = get_video_creation_time(path)
+
+            # MOV files return (epoch, display_string) tuple
+            if isinstance(video_result, tuple) and len(video_result) == 2:
+                video_epoch, display = video_result
+                return (video_epoch, display)
+
+            # Other video formats return just the epoch
+            if video_result > 0:
+                # video_epoch is already UTC-converted epoch via calendar.timegm()
+                # Display using fromtimestamp (converts UTC to local for display)
+                display = datetime.fromtimestamp(video_result).strftime(DATETIME_FMT)
+                return (video_result, display)
+
+        # Fall back to filesystem timestamps (these are stored in UTC)
         stat = path.stat()
         times = []
 
         # Collect all available timestamps
         if hasattr(stat, 'st_birthtime'):
-            times.append(stat.st_birthtime)  # Birth time (creation date on macOS and some filesystems)
-        times.append(stat.st_mtime)  # Modification time (when file was last modified)
-        times.append(stat.st_ctime)  # Change/creation time (depends on OS and file operation)
+            times.append(stat.st_birthtime)
+        times.append(stat.st_mtime)
+        times.append(stat.st_ctime)
 
         # Return the earliest timestamp
-        return min(times)
+        earliest = min(times)
+        # Convert UTC epoch to local time for display
+        display = datetime.fromtimestamp(earliest).strftime(DATETIME_FMT)
+        return (earliest, display)
     except:
-        return 0
+        return (0, "")
+
 
 def get_exif_rotation(path):
     """Get EXIF rotation in degrees. Handles all EXIF orientation values."""
@@ -702,21 +795,32 @@ class PVAnnotator(QWidget):
             if manual_ts is not None:
                 return manual_ts
 
-        # Check if we have cached creation time (skip if null)
+        # Use cached creation_time if available
         if "creation_time" in entry and entry["creation_time"] is not None:
             cached_ts = parse_creation_value(entry["creation_time"])
             if cached_ts is not None:
                 return cached_ts
 
-        # Get from filesystem and cache it
-        creation_time = get_file_creation_time(file_path)
+        # Only compute if not already cached
+        creation_time_tuple = get_file_creation_time(file_path)
+
+        # Handle tuple return (timestamp, display_string) or fallback to old behavior
+        if isinstance(creation_time_tuple, tuple):
+            creation_time, display_string = creation_time_tuple
+        else:
+            creation_time = creation_time_tuple
+            display_string = None
 
         # If no valid creation time found, use default date (2100-01-01 00:10:00) to sort files to the end
-        if creation_time == 0:
+        if creation_time == 0 or creation_time == "":
             default_date = datetime(2100, 1, 1, 0, 10, 0).timestamp()
             creation_time = default_date
+            display_string = format_creation_timestamp(creation_time)
+        elif display_string is None:
+            # Only format if display_string wasn't already provided by get_file_creation_time()
+            display_string = format_creation_timestamp(creation_time)
 
-        entry["creation_time"] = format_creation_timestamp(creation_time)
+        entry["creation_time"] = display_string
         return creation_time
 
     def validate_datetime(self, dt_string):
@@ -850,8 +954,15 @@ class PVAnnotator(QWidget):
         self.extract_and_store_location(p)
 
         # Use cached creation time for display
-        creation_time = self.get_cached_creation_time(p)
-        ts=format_creation_timestamp(creation_time)
+        # Get the stored display string from JSON instead of reformatting the epoch
+        filename = p.name
+        entry = self.data.get(filename, {})
+        ts = entry.get("creation_time")
+
+        # If not in JSON, calculate it
+        if not ts:
+            creation_time = self.get_cached_creation_time(p)
+            ts = format_creation_timestamp(creation_time)
 
         # Update datetime box (editable)
         self.datetime_box.blockSignals(True)
@@ -1180,9 +1291,10 @@ class PVAnnotator(QWidget):
             self.datetime_box.blockSignals(False)
             return
 
-        # Save the manual creation time
+        # Save the manual creation time - store the text directly without reformatting
+        # This preserves what the user entered
         entry = self.data.setdefault(p.name, {})
-        entry["creation_time_manual"] = format_creation_timestamp(timestamp)
+        entry["creation_time_manual"] = text
         self.save()
 
         # Re-sort media list with new time
