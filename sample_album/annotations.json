@@ -1,7 +1,7 @@
 {
   "_settings": {
     "font_size": 14,
-    "image_time": 1.0
+    "image_time": 5.0
   },
   "PXL_20251015_220836835.jpg": {
     "rotation": 90,
@@ -90,7 +90,7 @@
       }
     ],
     "location": {},
-    "creation_time": "2023/07/28 17:53:15"
+    "creation_time": "2023/07/28 10:53:15"
   },
   "France": {
     "use": true
@@ -181,5 +181,26 @@
   "image_from_paint_with_very_very_very_very_super_crazy_long_filename_that_does_not_wrap.gif": {
     "location": {},
     "creation_time": "2025/12/31 09:27:38"
+  },
+  "IMG_9743.JPG": {
+    "location": {
+      "latitude_longitude": {
+        "latitude": 10.26061,
+        "longitude": 103.93391
+      },
+      "automated_text": "\u0110\u1eb7c khu Ph\u00fa Qu\u1ed1c, T\u1ec9nh An Giang, Vi\u1ec7t Nam"
+    },
+    "creation_time": "2025/11/25 17:41:23"
+  },
+  "IMG_9744.MOV": {
+    "location": {
+      "latitude_longitude": {
+        "latitude": 10.2606,
+        "longitude": 103.9339
+      },
+      "automated_text": "\u0110\u1eb7c khu Ph\u00fa Qu\u1ed1c, T\u1ec9nh An Giang, Vi\u1ec7t Nam"
+    },
+    "annotations": [],
+    "creation_time": "2025/11/25 17:41:26"
   }
 }
