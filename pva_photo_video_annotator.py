@@ -1,188 +1,761 @@
-import sys
-import json
-import os
+import sys, json, shutil
 from pathlib import Path
-
-from PySide6.QtWidgets import (
-    QApplication, QWidget, QLabel, QTextEdit, QPushButton,
-    QVBoxLayout, QHBoxLayout, QFileDialog
-)
+from datetime import datetime
+from bisect import bisect_right
+import requests
+from tinytag import TinyTag
+from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton,
+    QTextEdit, QVBoxLayout, QHBoxLayout, QComboBox, QSlider, QFileDialog)
+from PySide6.QtCore import Qt, QTimer, QUrl, QPoint
+from PySide6.QtGui import QPixmap, QImage, QFont
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtGui import QPixmap
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PIL import Image, ExifTags
 
+SUPPORTED_IMAGES = {".jpg", ".jpeg", ".png"}
+SUPPORTED_VIDEOS = {".mp4", ".mov", ".avi"}
+JSON_NAME = "annotations.json"
+TRASH_DIR = "Trash"
+DEFAULT_FONT_SIZE = 14
+DEFAULT_IMAGE_TIME = 5  # seconds per image
 
-SUPPORTED_IMAGES = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
-SUPPORTED_VIDEOS = {".mp4", ".mov", ".avi", ".mkv"}
+def get_exif_rotation(path):
+    try:
+        img = Image.open(path)
+        exif = img._getexif()
+        if not exif: return 0
+        for k, v in ExifTags.TAGS.items():
+            if v=="Orientation":
+                return {3:180,6:270,8:90}.get(exif.get(k),0)
+    except: return 0
 
+def get_exif_gps(path):
+    """Extract latitude and longitude from EXIF data. Returns (lat, lon) or None."""
+    try:
+        img = Image.open(path)
+        exif = img._getexif()
+        if not exif: return None
 
-class MediaAnnotator(QWidget):
-    def __init__(self):
+        gps_ifd = None
+        for tag, value in exif.items():
+            if ExifTags.TAGS.get(tag) == "GPSInfo":
+                gps_ifd = value
+                break
+
+        if not gps_ifd: return None
+
+        gps_data = {}
+        for tag, value in gps_ifd.items():
+            gps_tag = ExifTags.GPSTAGS.get(tag, tag)
+            gps_data[gps_tag] = value
+
+        def get_decimal_from_dms(dms):
+            d, m, s = dms
+            return d + (m / 60.0) + (s / 3600.0)
+
+        lat = get_decimal_from_dms(gps_data["GPSLatitude"]) if "GPSLatitude" in gps_data else None
+        lon = get_decimal_from_dms(gps_data["GPSLongitude"]) if "GPSLongitude" in gps_data else None
+
+        if "GPSLatitudeRef" in gps_data and gps_data["GPSLatitudeRef"] == "S":
+            lat = -lat
+        if "GPSLongitudeRef" in gps_data and gps_data["GPSLongitudeRef"] == "W":
+            lon = -lon
+
+        return (lat, lon) if lat and lon else None
+    except: return None
+
+def reverse_geocode_nominatim(lat, lon):
+    """Reverse geocode using OpenStreetMap Nominatim API. Returns formatted address or None."""
+    try:
+        url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}"
+        headers = {"User-Agent": "PVA-Photo-Video-Annotator/1.0"}
+        print(f"    Calling API: {url}")
+        response = requests.get(url, timeout=2, headers=headers)
+        print(f"    API response status: {response.status_code}")
+        if response.status_code == 200:
+            data = response.json()
+            address = data.get("address", {})
+            print(f"    Raw address data: {address}")
+            # Build address as City, State, Country
+            city = address.get("city") or address.get("town") or address.get("village")
+            state = address.get("state")
+            country = address.get("country")
+
+            parts = []
+            if city: parts.append(city)
+            if state: parts.append(state)
+            if country: parts.append(country)
+
+            result = ", ".join(parts) if parts else None
+            print(f"    Formatted result: {result}")
+            return result
+        else:
+            print(f"    API returned status {response.status_code}")
+    except requests.Timeout:
+        print(f"    API call timed out (2 second timeout)")
+    except Exception as e:
+        print(f"    API call failed: {e}")
+    return None
+
+def load_image(path, rotation):
+    img = Image.open(path)
+    if rotation: img = img.rotate(rotation, expand=True)
+    img = img.convert("RGB")
+    qimg = QImage(img.tobytes(), img.width, img.height, QImage.Format_RGB888)
+    return QPixmap.fromImage(qimg)
+
+def get_video_duration_ms(video_path):
+    """Get video duration in milliseconds using tinytag. Returns duration or None."""
+    try:
+        tag = TinyTag.get(str(video_path), tags=False, duration=True)
+        if tag and tag.duration:
+            duration_ms = int(tag.duration * 1000)
+            return duration_ms
+    except Exception as e:
+        print(f"Could not get duration for {video_path}: {e}")
+    return None
+
+def format_time_ms(ms):
+    """Format milliseconds as MM:SS."""
+    if ms is None or ms < 0:
+        return "00:00"
+    total_seconds = ms // 1000
+    minutes = total_seconds // 60
+    seconds = total_seconds % 60
+    return f"{minutes:02d}:{seconds:02d}"
+
+class TimestampSlider(QSlider):
+    """Custom slider that shows timestamp tooltip on hover/click."""
+    def __init__(self, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self.setMouseTracking(True)
+
+    def mouseMoveEvent(self, event):
+        # Calculate the value at the mouse position
+        if self.maximum() > 0:
+            x_pos = event.pos().x()
+            width = self.width()
+            value = int((x_pos / width) * self.maximum())
+            self.setToolTip(format_time_ms(value))
+            # Show tooltip immediately
+            QApplication.instance().processEvents()
+        return super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            # Calculate value from click position
+            if self.maximum() > 0:
+                x_pos = event.pos().x()
+                width = self.width()
+                value = int((x_pos / width) * self.maximum())
+                self.setValue(value)
+        return super().mousePressEvent(event)
+
+class PVAnnotator(QWidget):
+    def __init__(self,start_path=None):
         super().__init__()
-        self.setWindowTitle("Media Annotator")
+        self.setWindowTitle("PVA Photo Video Annotator")
+        self.setGeometry(QApplication.primaryScreen().availableGeometry())
+        self.showMaximized()
 
-        self.media_files = []
-        self.current_index = 0
-        self.annotations = {}
-        self.base_dir = None
-        self.scroll_timer = QTimer()
-        self.scroll_timer.timeout.connect(self.scroll_text)
+        self.dir=None; self.media=[]; self.index=0
+        self.data={}; self.slideshow=False
+        self.timer=QTimer(); self.timer.timeout.connect(self.advance_slideshow)
 
-        self.build_ui()
+        # Widgets
+        self.image_label=QLabel(alignment=Qt.AlignCenter)
+        self.image_label.setStyleSheet("background-color: white;")
+        self.prev_btn=QPushButton("Previous")
+        self.skip_btn=QPushButton("Skip")
+        self.trash_btn=QPushButton("Trash")
+        self.rotate_btn=QPushButton("Rotate")
+        self.volume_btn=QPushButton("100% volume")
+        self.slide_btn=QPushButton("Slideshow")
+        self.next_btn=QPushButton("Next")
+        for b,f in [(self.prev_btn,self.prev_item),(self.next_btn,self.next_item),
+                    (self.skip_btn,self.skip_item),(self.trash_btn,self.trash_item),
+                    (self.rotate_btn,self.rotate_item),(self.volume_btn,self.change_volume),
+                    (self.slide_btn,self.toggle_slideshow)]: b.clicked.connect(f)
 
-    def build_ui(self):
-        self.media_label = QLabel("Open a folder to begin")
-        self.media_label.setAlignment(Qt.AlignCenter)
+        self.meta_label=QLabel(); self.meta_label.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
+        self.meta_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.location_combo=QComboBox(); self.location_combo.setEditable(True)
+        self.location_combo.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
+        self.location_combo.currentTextChanged.connect(self.update_location_text)
+        self.text_box=QTextEdit(); self.text_box.setFixedHeight(90)
+        self.text_box.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
 
-        self.video_widget = QVideoWidget()
-        self.video_widget.hide()
+        self.skip_in_progress = False
+        self.new_annotation_pending = False
 
-        self.player = QMediaPlayer()
-        self.audio = QAudioOutput()
-        self.player.setAudioOutput(self.audio)
-        self.player.setVideoOutput(self.video_widget)
+        self.video_widget=QVideoWidget(); self.video_widget.setStyleSheet("background-color: white;")
+        self.video_player=QMediaPlayer()  # Qt6 disables hw accel by default
+        self.audio_output=QAudioOutput()
+        self.video_player.setAudioOutput(self.audio_output)
+        self.video_player.setVideoOutput(self.video_widget)
+        self.video_slider=TimestampSlider()
+        self.video_slider.sliderMoved.connect(lambda pos: self.video_player.setPosition(pos))
+        self.video_player.positionChanged.connect(lambda pos: self.update_video_annotation(pos))
+        self.video_player.positionChanged.connect(lambda pos: self.video_slider.setValue(pos))
+        self.video_player.durationChanged.connect(lambda d: self.video_slider.setMaximum(d))
 
-        self.text_edit = QTextEdit()
-        self.text_edit.setFixedHeight(120)
-        self.text_edit.textChanged.connect(self.save_annotation)
+        self.play_btn=QPushButton("Play/Pause"); self.play_btn.clicked.connect(self.toggle_play)
+        self.replay_btn=QPushButton("Replay"); self.replay_btn.clicked.connect(self.replay_video)
+        self.add_ann_btn=QPushButton("Add annotation"); self.add_ann_btn.clicked.connect(self.add_annotation)
+        self.edit_ann_btn=QPushButton("Edit annotation"); self.edit_ann_btn.clicked.connect(self.edit_annotation)
+        self.remove_ann_btn=QPushButton("Remove annotation"); self.remove_ann_btn.clicked.connect(self.remove_annotation)
+        self.skip_ann_btn=QPushButton("Skip until next annotation"); self.skip_ann_btn.clicked.connect(self.skip_until_next_annotation)
 
-        prev_btn = QPushButton("◀ Previous")
-        next_btn = QPushButton("Next ▶")
-        open_btn = QPushButton("Open Folder")
-
-        prev_btn.clicked.connect(self.prev_media)
-        next_btn.clicked.connect(self.next_media)
-        open_btn.clicked.connect(self.open_folder)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.addWidget(prev_btn)
-        btn_layout.addWidget(open_btn)
-        btn_layout.addWidget(next_btn)
-
-        layout = QVBoxLayout()
-        layout.addWidget(self.media_label)
+        # Layout
+        layout=QVBoxLayout(self)
+        layout.addWidget(self.image_label)
         layout.addWidget(self.video_widget)
-        layout.addWidget(self.text_edit)
-        layout.addLayout(btn_layout)
+        layout.addWidget(self.video_slider)
+        video_btn_layout=QHBoxLayout()
+        for b in [self.play_btn,self.replay_btn,self.add_ann_btn,self.edit_ann_btn,
+                  self.remove_ann_btn,self.skip_ann_btn]: video_btn_layout.addWidget(b)
+        layout.addLayout(video_btn_layout)
+        button_layout=QHBoxLayout()
+        for b in [self.prev_btn,self.skip_btn,self.trash_btn,self.rotate_btn,self.volume_btn,self.slide_btn,self.next_btn]: button_layout.addWidget(b)
+        layout.addLayout(button_layout)
+        meta_layout=QHBoxLayout()
+        meta_layout.addWidget(self.meta_label,3); meta_layout.addWidget(self.location_combo,2)
+        layout.addLayout(meta_layout)
+        layout.addWidget(self.text_box)
 
-        self.setLayout(layout)
+        # Override focus out to commit annotation
+        orig_focus_out = self.text_box.focusOutEvent
+        def text_focus_out(event):
+            # Only call update_text() if not creating a new annotation
+            # (new annotations are saved by save_pending_annotation instead)
+            if not self.new_annotation_pending:
+                self.update_text()
+            self.commit_editing_annotation()       # commit edit if editing
+            self.save_pending_annotation()         # commit new annotation if pending
+            orig_focus_out(event)
+        self.text_box.focusOutEvent = text_focus_out
 
-    # ---------- Folder & Loading ----------
+        self.load_directory(start_path)
 
-    def open_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Media Folder")
-        if not folder:
+    # ---------------- Directory ----------------
+    def load_directory(self,start_path=None):
+        if start_path:
+            start_path=Path(start_path)
+            self.dir=start_path.parent if start_path.is_file() else start_path
+        else:
+            d=QFileDialog.getExistingDirectory(self,"Select media directory")
+            if not d: sys.exit()
+            self.dir=Path(d)
+        self.trash=self.dir/TRASH_DIR; self.trash.mkdir(exist_ok=True)
+        self.json_path=self.dir/JSON_NAME
+        if self.json_path.exists():
+            self.data=json.loads(self.json_path.read_text())
+        else: self.data={"_settings":{"font_size":DEFAULT_FONT_SIZE,"image_time":DEFAULT_IMAGE_TIME}}
+        self.media=sorted([p for p in self.dir.iterdir() if p.suffix.lower() in SUPPORTED_IMAGES|SUPPORTED_VIDEOS],
+                          key=lambda p: p.stat().st_mtime)
+        if start_path and start_path.is_file() and start_path in self.media:
+            self.index=self.media.index(start_path)
+        # Sort video annotations
+        for entry in self.data.values():
+            if "annotations" in entry:
+                entry["annotations"]=sorted(entry["annotations"],key=lambda a: a["time"])
+        self.show_item()
+
+    # ---------------- Helpers ----------------
+    def current(self): return self.media[self.index]
+    def save(self):
+        # Clean up rotation field for videos (rotation only applies to images)
+        for filename in self.data:
+            if filename != "_settings":
+                # Check if this file is a video
+                is_video = False
+                for p in self.media:
+                    if p.name == filename and p.suffix.lower() in SUPPORTED_VIDEOS:
+                        is_video = True
+                        break
+                # Remove rotation field from videos
+                if is_video:
+                    self.data[filename].pop("rotation", None)
+
+        self.json_path.write_text(json.dumps(self.data,indent=2))
+
+    # ---------------- Media Display ----------------
+    def extract_and_store_location(self, file_path):
+        """Extract GPS coordinates from media file and reverse geocode if available."""
+        p = self.current()
+        if p.suffix.lower() not in SUPPORTED_IMAGES:
             return
 
-        self.base_dir = Path(folder)
-        self.load_media_files()
-        self.load_annotations()
+        entry = self.data.setdefault(p.name, {})
+        location = entry.setdefault("location", {})
 
-        self.current_index = 0
-        self.show_current_media()
-
-    def load_media_files(self):
-        self.media_files = [
-            f for f in sorted(self.base_dir.iterdir())
-            if f.suffix.lower() in SUPPORTED_IMAGES | SUPPORTED_VIDEOS
-        ]
-
-    def load_annotations(self):
-        self.annotations_path = self.base_dir / "annotations.json"
-        if self.annotations_path.exists():
-            with open(self.annotations_path, "r", encoding="utf-8") as f:
-                self.annotations = json.load(f)
-        else:
-            self.annotations = {}
-
-    def save_annotations_file(self):
-        with open(self.annotations_path, "w", encoding="utf-8") as f:
-            json.dump(self.annotations, f, indent=2)
-
-    # ---------- Display ----------
-
-    def show_current_media(self):
-        if not self.media_files:
+        # Skip if we already have automated location data
+        if "automated_text" in location:
             return
 
-        file = self.media_files[self.current_index]
-        suffix = file.suffix.lower()
+        # Extract GPS from EXIF if not already present
+        if "latitude_longitude" not in location:
+            print(f"Extracting GPS from {p.name}...")
+            gps = get_exif_gps(file_path)
+            if not gps:
+                print(f"  No GPS data found in {p.name}")
+                return
 
-        self.player.stop()
-        self.video_widget.hide()
-        self.media_label.show()
-
-        if suffix in SUPPORTED_IMAGES:
-            pixmap = QPixmap(str(file))
-            self.media_label.setPixmap(
-                pixmap.scaled(
-                    self.media_label.size(),
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-            )
+            lat, lon = gps
+            # Round to 5 decimal places (approximately 1.1 meter accuracy)
+            lat = round(lat, 5)
+            lon = round(lon, 5)
+            location["latitude_longitude"] = {"latitude": lat, "longitude": lon}
+            print(f"  Found GPS: {lat}, {lon}")
         else:
-            self.media_label.hide()
-            self.video_widget.show()
-            self.player.setSource(QUrl.fromLocalFile(str(file)))
-            self.player.play()
+            lat = location["latitude_longitude"]["latitude"]
+            lon = location["latitude_longitude"]["longitude"]
+            print(f"Using existing GPS for {p.name}: {lat}, {lon}")
 
-        self.load_annotation_text()
-        self.start_scroll_if_needed()
+        # Try reverse geocoding
+        print(f"  Reverse geocoding {lat}, {lon}...")
+        address = reverse_geocode_nominatim(lat, lon)
+        if address:
+            print(f"  Found address: {address}")
+            location["automated_text"] = address
+        else:
+            print(f"  No address found or API timeout")
 
-    # ---------- Annotation Handling ----------
+        self.save()
 
-    def load_annotation_text(self):
-        file = self.media_files[self.current_index].name
-        text = self.annotations.get(file, {}).get("text", "")
-        self.text_edit.blockSignals(True)
-        self.text_edit.setPlainText(text)
-        self.text_edit.blockSignals(False)
+    def show_item(self):
+        if not self.media: return
+        p=self.current(); entry=self.data.setdefault(p.name,{"rotation":0,"text":""})
+        if entry.get("skip", False): self.next_item(); return
 
-    def save_annotation(self):
-        if not self.media_files:
+        # Extract location data if available
+        self.extract_and_store_location(p)
+
+        ts=datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d | %H:%M:%S")
+        self.meta_label.setText(f"{ts} | {p.name}")
+
+        # Dropdown locations
+        manual_locations=list({self.data[f].get("location",{}).get("manual_text","") for f in self.data if "location" in self.data[f]})
+        auto_locations=list({self.data[f].get("location",{}).get("automated_text","") for f in self.data if "location" in self.data[f]})
+        all_locations=list(set([loc for loc in manual_locations + auto_locations if loc]))
+        current_loc=entry.get("location",{}).get("manual_text","") or entry.get("location",{}).get("automated_text","")
+        self.location_combo.blockSignals(True)
+        self.location_combo.clear(); self.location_combo.addItem(current_loc)
+        for loc in all_locations:
+            if loc!=current_loc: self.location_combo.addItem(loc)
+        self.location_combo.setCurrentText(current_loc)
+        self.location_combo.blockSignals(False)
+
+        # Text box
+        if p.suffix.lower() in SUPPORTED_IMAGES:
+            self.text_box.setText(entry.get("text",""))
+        else:
+            annotations=entry.setdefault("annotations",[])
+            ann0=next((a for a in annotations if a["time"]==0.0),None)
+            self.text_box.setText(ann0["text"] if ann0 else "")
+
+        self.setFocus()
+        # Media display
+        if p.suffix.lower() in SUPPORTED_IMAGES:
+            self.video_widget.hide(); self.video_slider.hide()
+            for b in [self.play_btn,self.replay_btn,self.add_ann_btn,self.edit_ann_btn,
+                      self.remove_ann_btn,self.skip_ann_btn]: b.hide()
+            self.rotate_btn.show()
+            self.volume_btn.hide()
+            self.image_label.show()
+            rot=entry.get("rotation",get_exif_rotation(p))
+            pix=load_image(p,rot)
+            self.image_label.setPixmap(pix.scaled(800,600,Qt.KeepAspectRatio))
+            self.video_player.stop()
+        else:
+            self.image_label.hide(); self.video_widget.show(); self.video_slider.show()
+            for b in [self.play_btn,self.replay_btn,self.add_ann_btn,self.edit_ann_btn,
+                      self.remove_ann_btn,self.skip_ann_btn]: b.show()
+            self.rotate_btn.hide()
+            self.volume_btn.show()
+            # Apply stored volume
+            volume = entry.get("volume", 100)
+            self.audio_output.setVolume(volume / 100.0)
+            self.volume_btn.setText(f"{volume}% volume")
+            print(f"Loading video: {p.name} with volume {volume}%")
+            self.video_player.setSource(QUrl.fromLocalFile(str(p)))
+            # Use a single-shot timer to allow the source to load before playing
+            QTimer.singleShot(100, self.video_player.play)
+            print(f"Video playback starting for: {p.name}")
+
+        # Next/Prev labels
+        self.prev_btn.setText("Jump to last" if self.index==0 else "Previous")
+        self.next_btn.setText("Back to first" if self.index==len(self.media)-1 else "Next")
+        self.save()
+
+    # ---------------- Video Annotation ----------------
+    def get_current_video_annotations(self):
+        p=self.current()
+        return self.data.setdefault(p.name,{}).setdefault("annotations",[])
+
+    def update_video_annotation(self, pos):
+
+        if hasattr(self, "editing_annotation"):
+            # Skip updating the text box while editing
             return
 
-        file = self.media_files[self.current_index].name
-        self.annotations.setdefault(file, {})["text"] = self.text_edit.toPlainText()
-        self.save_annotations_file()
-        self.start_scroll_if_needed()
+        self.commit_editing_annotation()
 
-    # ---------- Navigation ----------
+        p = self.current()
+        if p.suffix.lower() not in SUPPORTED_VIDEOS:
+            return
 
-    def next_media(self):
-        if self.media_files:
-            self.current_index = (self.current_index + 1) % len(self.media_files)
-            self.show_current_media()
+        pos_sec = pos / 1000.0
+        annotations = self.get_current_video_annotations()
+        if not annotations:
+            return
 
-    def prev_media(self):
-        if self.media_files:
-            self.current_index = (self.current_index - 1) % len(self.media_files)
-            self.show_current_media()
+        annotations.sort(key=lambda a: a["time"])
 
-    # ---------- Text Scrolling ----------
+        active_ann = None
+        for i, ann in enumerate(annotations):
+            if ann["time"] <= pos_sec:
+                active_ann = (i, ann)
+            else:
+                break
 
-    def start_scroll_if_needed(self):
-        self.scroll_timer.stop()
-        doc_height = self.text_edit.document().size().height()
-        box_height = self.text_edit.viewport().height()
+        if not active_ann:
+            return
 
-        if doc_height > box_height:
-            self.scroll_pos = 0
-            self.scroll_timer.start(100)  # adjust speed here
+        i, ann = active_ann
 
-    def scroll_text(self):
-        scrollbar = self.text_edit.verticalScrollBar()
-        if scrollbar.value() < scrollbar.maximum():
-            scrollbar.setValue(scrollbar.value() + 1)
+        # Handle skip annotation
+        if ann.get("skip", False):
+            playback = self.video_player.playbackState() == QMediaPlayer.PlayingState
+
+            if playback:
+                # Skip automatically
+                if i + 1 < len(annotations):
+                    next_time = annotations[i + 1]["time"]
+                    self.video_player.setPosition(int(next_time * 1000))
+                else:
+                    # Last annotation: jump to video end
+                    dur = self.video_player.duration()
+                    if dur > 0:
+                        self.video_player.setPosition(dur)
+                    else:
+                        self.video_player.setPosition(self.video_player.position() + 1000)  # 1 sec ahead
+                    # Make sure text shows "Segment skipped"
+                    self.text_box.blockSignals(True)
+                    self.text_box.setText(ann.get("text", "Segment skipped"))
+                    self.text_box.blockSignals(False)
+                return
+            else:
+                # Paused or manual seek: show text
+                self.text_box.blockSignals(True)
+                self.text_box.setText(ann.get("text", "Segment skipped"))
+                self.text_box.blockSignals(False)
+                return
+
+        # Normal annotation
+        self.text_box.blockSignals(True)
+        self.text_box.setText(ann.get("text", ""))
+        self.text_box.blockSignals(False)
+
+
+    def skip_until_next_annotation(self):
+        p = self.current()
+        if p.suffix.lower() not in SUPPORTED_VIDEOS:
+            return
+
+        pos_sec = self.video_player.position() / 1000.0
+        annotations = self.get_current_video_annotations()
+
+        # Prevent duplicate skip at same timestamp
+        for ann in annotations:
+            if ann["time"] == pos_sec and ann.get("skip", False):
+                return
+
+        # Add skip annotation with text
+        annotations.append({
+            "time": pos_sec,
+            "text": "Segment skipped",
+            "skip": True  # Skip annotation - only include when true
+        })
+        annotations.sort(key=lambda a: a["time"])
+        self.save()
+
+        # Jump to next annotation if exists, else pause at end
+        next_ann = next((a for a in annotations if a["time"] > pos_sec), None)
+        if next_ann:
+            self.video_player.setPosition(int(next_ann["time"] * 1000))
         else:
-            scrollbar.setValue(0)
+            dur = self.video_player.duration()
+            if dur > 0:
+                self.video_player.setPosition(dur)
+        self.video_player.pause()
+        self.update_video_annotation(self.video_player.position())
+
+    def save_pending_annotation(self):
+        if not self.new_annotation_pending:
+            return
+        p = self.current()
+        if p.suffix.lower() not in SUPPORTED_VIDEOS:
+            self.new_annotation_pending = False
+            return
+        text = self.text_box.toPlainText().strip()
+        if text:
+            annotations = self.get_current_video_annotations()
+            annotations.append({
+                "time": getattr(self, "new_annotation_timestamp", self.video_player.position()/1000.0),
+                "text": text
+            })
+            annotations.sort(key=lambda a: a["time"])
+            self.save()
+        self.new_annotation_pending = False
+        if hasattr(self, "new_annotation_timestamp"):
+            delattr(self, "new_annotation_timestamp")
+
+    def add_annotation(self):
+        p = self.current()
+        if p.suffix.lower() not in SUPPORTED_VIDEOS:
+            return
+        if self.video_player.playbackState() != QMediaPlayer.PausedState:
+            self.video_player.pause()
+        self.new_annotation_pending = True
+        self.new_annotation_timestamp = self.video_player.position() / 1000.0
+        self.text_box.clear()
+        self.text_box.setFocus()
+        cursor = self.text_box.textCursor()
+        cursor.movePosition(cursor.End)
+        self.text_box.setTextCursor(cursor)
+
+    def edit_annotation(self):
+        p = self.current()
+        if p.suffix.lower() not in SUPPORTED_VIDEOS:
+            return
+
+        # Commit any pending new annotation first
+        self.save_pending_annotation()
+        self.commit_editing_annotation()  # Commit any currently editing annotation
+
+        pos_sec = self.video_player.position() / 1000.0
+        annotations = self.get_current_video_annotations()  # get real list
+        annotations.sort(key=lambda a: a["time"])           # sort in-place
+
+        # Find the annotation immediately before current video position
+        times = [a["time"] for a in annotations]
+        idx = bisect_right(times, pos_sec) - 1
+        if 0 <= idx < len(annotations):
+            # Use the real annotation object, not a copy
+            self.editing_annotation = annotations[idx]
+            self.text_box.setText(self.editing_annotation.get("text", ""))
+            self.text_box.setFocus()
+            cursor = self.text_box.textCursor()
+            cursor.movePosition(cursor.End)
+            self.text_box.setTextCursor(cursor)
+
+    def commit_editing_annotation(self):
+        if hasattr(self, "editing_annotation"):
+            self.editing_annotation["text"] = self.text_box.toPlainText()
+            self.save()
+            del self.editing_annotation
+
+    # ---------------- Text Box Focus ----------------
+    def text_focus_out(self, event):
+        """Commit any new or edited annotation when text box loses focus."""
+        self.commit_editing_annotation()
+        self.save_pending_annotation()
+        QTextEdit.focusOutEvent(self.text_box, event)
+
+    def text_focus_in(self, event):
+        """Pause video when text box gains focus."""
+        p = self.current()
+        if p.suffix.lower() in SUPPORTED_VIDEOS:
+            self.video_player.pause()
+        QTextEdit.focusInEvent(self.text_box, event)
 
 
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = MediaAnnotator()
-    window.resize(800, 600)
-    window.show()
+    def remove_annotation(self):
+        p = self.current()
+        if p.suffix.lower() not in SUPPORTED_VIDEOS:
+            return
+
+        self.video_player.pause()
+        pos_sec = self.video_player.position() / 1000.0
+
+        annotations = self.get_current_video_annotations()
+        if not annotations:
+            return
+
+        # Ensure sorted
+        annotations.sort(key=lambda a: a["time"])
+
+        # Find active annotation: last one with time <= current time
+        active_idx = None
+        for i, ann in enumerate(annotations):
+            if ann["time"] <= pos_sec:
+                active_idx = i
+            else:
+                break
+
+        if active_idx is None:
+            return
+
+        # Remove it
+        annotations.pop(active_idx)
+
+        # Determine new position
+        if active_idx - 1 >= 0:
+            new_time = annotations[active_idx - 1]["time"]
+        else:
+            new_time = 0.0
+
+        # Seek and pause
+        self.video_player.setPosition(int(new_time * 1000))
+        self.update_video_annotation(int(new_time * 1000))
+
+        self.save()
+
+
+    # ---------------- Generic ----------------
+    def update_text(self):
+        p=self.current()
+        if p.suffix.lower() in SUPPORTED_IMAGES:
+            self.data.setdefault(p.name,{})["text"]=self.text_box.toPlainText()
+        else:
+            annotations=self.get_current_video_annotations()
+            ann0=next((a for a in annotations if a["time"]==0.0),None)
+            if ann0: ann0["text"]=self.text_box.toPlainText()
+            else: annotations.append({"time":0.0,"text":self.text_box.toPlainText()})
+        self.save()
+
+    def update_location_text(self,text):
+        p=self.current()
+        self.data.setdefault(p.name,{}).setdefault("location",{})["manual_text"]=text
+        self.save()
+
+    # ---------------- Navigation ----------------
+    def next_item(self):
+        self.index=(self.index+1)%len(self.media)
+        self.show_item()
+
+    def prev_item(self):
+        self.index=(self.index-1)%len(self.media)
+        if self.slideshow: self.toggle_slideshow()
+        self.show_item()
+
+    def skip_item(self):
+        self.data[self.current().name]["skip"]=True; self.save(); self.next_item()
+
+    def rotate_item(self):
+        p=self.current()
+        # Only allow rotation for images
+        if p.suffix.lower() not in SUPPORTED_IMAGES:
+            return
+
+        entry=self.data.setdefault(p.name,{})
+        current_rotation=entry.get("rotation",0)
+        # Cycle through 0, 90, 180, 270
+        new_rotation=(current_rotation+90)%360
+        # Store rotation only if not 0 (default)
+        if new_rotation==0:
+            entry.pop("rotation",None)
+        else:
+            entry["rotation"]=new_rotation
+        print(f"Rotation for '{p.name}': {new_rotation}°")
+        self.save()
+        self.show_item()
+
+    def change_volume(self):
+        p=self.current()
+        # Only allow volume control for videos
+        if p.suffix.lower() not in SUPPORTED_VIDEOS:
+            return
+
+        entry=self.data.setdefault(p.name,{})
+        current_volume=entry.get("volume",100)
+        # Cycle through 100, 80, 60, 40, 20, 0, then back to 100
+        volume_levels=[100,80,60,40,20,0]
+        current_idx=volume_levels.index(current_volume) if current_volume in volume_levels else 0
+        new_idx=(current_idx+1)%len(volume_levels)
+        new_volume=volume_levels[new_idx]
+
+        # Store volume only if not 100 (default)
+        if new_volume==100:
+            entry.pop("volume",None)
+        else:
+            entry["volume"]=new_volume
+
+        # Apply volume immediately
+        self.audio_output.setVolume(new_volume/100.0)
+        self.volume_btn.setText(f"{new_volume}% volume")
+        print(f"Volume for '{p.name}': {new_volume}%")
+        self.save()
+
+    def trash_item(self):
+        p=self.current(); shutil.move(str(p),self.trash/p.name)
+        self.media.remove(p); self.save(); self.show_item()
+
+    def toggle_slideshow(self):
+        self.slideshow=not self.slideshow
+        if self.slideshow:
+            self.slide_btn.setText("Stop slideshow")
+            p=self.current()
+            if p.suffix.lower() in SUPPORTED_VIDEOS:
+                # For videos, get duration and set timer to that
+                dur_ms = get_video_duration_ms(p)
+                if dur_ms and dur_ms > 0:
+                    print(f"Slideshow START: Video '{p.name}' duration is {format_time_ms(dur_ms)} ({dur_ms}ms)")
+                    self.timer.start(dur_ms)
+                else:
+                    print(f"Slideshow START: Could not get video duration for '{p.name}', using default {self.get_image_time()}s")
+                    self.timer.start(self.get_image_time()*1000)
+            else:
+                # For images, use the image time
+                print(f"Slideshow START: Image '{p.name}'")
+                self.timer.start(self.get_image_time()*1000)
+        else:
+            self.slide_btn.setText("Slideshow")
+            self.timer.stop()
+            p=self.current()
+            if p.suffix.lower() in SUPPORTED_VIDEOS:
+                self.video_player.pause()
+
+    def advance_slideshow(self):
+        self.next_item()
+        # Now set timer for the newly loaded item
+        p=self.current()
+        if p.suffix.lower() in SUPPORTED_IMAGES:
+            duration=max(self.get_image_time(),len(self.text_box.toPlainText().split())/4)*1000
+            print(f"Slideshow ADVANCE: Image '{p.name}', duration {format_time_ms(int(duration))}")
+            self.timer.start(int(duration))
+        else:
+            # For videos, get duration and set timer to that
+            dur_ms = get_video_duration_ms(p)
+            if dur_ms and dur_ms > 0:
+                print(f"Slideshow ADVANCE: Video '{p.name}' duration is {format_time_ms(dur_ms)} ({dur_ms}ms)")
+                self.timer.start(dur_ms)
+            else:
+                print(f"Slideshow ADVANCE: Could not get video duration for '{p.name}', using default {self.get_image_time()}s")
+                self.timer.start(self.get_image_time()*1000)
+        if self.index==0: self.timer.start(self.get_image_time()*1000)
+
+    def get_image_time(self):
+        return self.data.get("_settings",{}).get("image_time",DEFAULT_IMAGE_TIME)
+
+    # ---------------- Video Controls ----------------
+    def toggle_play(self):
+        if self.video_player.playbackState()==QMediaPlayer.PlayingState: self.video_player.pause()
+        else: self.video_player.play()
+
+    def replay_video(self):
+        self.video_player.setPosition(0); self.video_player.play()
+
+    # ---------------- Keyboard ----------------
+    def keyPressEvent(self,event):
+        if event.key()==Qt.Key_Right: self.next_item()
+        elif event.key()==Qt.Key_Left: self.prev_item()
+        else: super().keyPressEvent(event)
+
+if __name__=="__main__":
+    app=QApplication(sys.argv)
+    start_path=sys.argv[1] if len(sys.argv)>1 else None
+    w=PVAnnotator(start_path)
+    w.show()
     sys.exit(app.exec())
