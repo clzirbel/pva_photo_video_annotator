@@ -5,19 +5,31 @@ from bisect import bisect_right
 import requests
 from tinytag import TinyTag
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton,
-    QTextEdit, QVBoxLayout, QHBoxLayout, QComboBox, QSlider, QFileDialog)
+    QTextEdit, QVBoxLayout, QHBoxLayout, QComboBox, QSlider, QFileDialog, QMessageBox)
 from PySide6.QtCore import Qt, QTimer, QUrl, QPoint
 from PySide6.QtGui import QPixmap, QImage, QFont
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PIL import Image, ExifTags
 
-SUPPORTED_IMAGES = {".jpg", ".jpeg", ".png"}
-SUPPORTED_VIDEOS = {".mp4", ".mov", ".avi"}
+SUPPORTED_IMAGES = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"}
+SUPPORTED_VIDEOS = {".mp4", ".mov", ".avi", ".mkv", ".flv", ".wmv", ".webm", ".m4v", ".3gp"}
 JSON_NAME = "annotations.json"
-TRASH_DIR = "Trash"
+TRASH_DIR = "set_aside"
 DEFAULT_FONT_SIZE = 14
 DEFAULT_IMAGE_TIME = 5  # seconds per image
+
+def get_file_creation_time(path):
+    """Get file creation time, cross-platform compatible."""
+    try:
+        stat = path.stat()
+        # Try birthtime first (macOS and some Linux filesystems)
+        if hasattr(stat, 'st_birthtime'):
+            return stat.st_birthtime
+        # Fall back to ctime (creation time on Windows, metadata change time on Linux)
+        return stat.st_ctime
+    except:
+        return 0
 
 def get_exif_rotation(path):
     try:
@@ -167,7 +179,7 @@ class PVAnnotator(QWidget):
         self.image_label.setStyleSheet("background-color: white;")
         self.prev_btn=QPushButton("Previous")
         self.skip_btn=QPushButton("Skip")
-        self.trash_btn=QPushButton("Trash")
+        self.trash_btn=QPushButton("Set Aside")
         self.rotate_btn=QPushButton("Rotate")
         self.volume_btn=QPushButton("100% volume")
         self.slide_btn=QPushButton("Slideshow")
@@ -251,8 +263,9 @@ class PVAnnotator(QWidget):
         if self.json_path.exists():
             self.data=json.loads(self.json_path.read_text())
         else: self.data={"_settings":{"font_size":DEFAULT_FONT_SIZE,"image_time":DEFAULT_IMAGE_TIME}}
-        self.media=sorted([p for p in self.dir.iterdir() if p.suffix.lower() in SUPPORTED_IMAGES|SUPPORTED_VIDEOS],
-                          key=lambda p: p.stat().st_mtime)
+        self.check_and_prompt_folders()
+        self.media=sorted([p for p in self.get_all_media_files()],
+                          key=lambda p: get_file_creation_time(p))
         if start_path and start_path.is_file() and start_path in self.media:
             self.index=self.media.index(start_path)
         # Sort video annotations
@@ -264,20 +277,50 @@ class PVAnnotator(QWidget):
     # ---------------- Helpers ----------------
     def current(self): return self.media[self.index]
     def save(self):
+        # Build a fast lookup set of video filenames for O(1) lookup
+        video_names = {p.name for p in self.media if p.suffix.lower() in SUPPORTED_VIDEOS}
+
         # Clean up rotation field for videos (rotation only applies to images)
         for filename in self.data:
-            if filename != "_settings":
-                # Check if this file is a video
-                is_video = False
-                for p in self.media:
-                    if p.name == filename and p.suffix.lower() in SUPPORTED_VIDEOS:
-                        is_video = True
-                        break
-                # Remove rotation field from videos
-                if is_video:
-                    self.data[filename].pop("rotation", None)
+            if filename != "_settings" and filename in video_names:
+                self.data[filename].pop("rotation", None)
 
         self.json_path.write_text(json.dumps(self.data,indent=2))
+
+    def check_and_prompt_folders(self):
+        """Check all folders in directory and prompt user if not already set."""
+        for item in self.dir.iterdir():
+            if item.is_dir() and item.name != TRASH_DIR:
+                # Check if we already have a "use" setting for this folder
+                if item.name not in self.data or "use" not in self.data[item.name]:
+                    # Prompt user
+                    reply = QMessageBox.question(
+                        self,
+                        "Include Folder?",
+                        f"Include files from '{item.name}' folder?",
+                        QMessageBox.Yes | QMessageBox.No
+                    )
+                    # Save the choice
+                    if item.name not in self.data:
+                        self.data[item.name] = {}
+                    self.data[item.name]["use"] = (reply == QMessageBox.Yes)
+        self.save()
+
+    def get_all_media_files(self):
+        """Get all media files from root and included folders."""
+        files = []
+        # Add files from root directory
+        for p in self.dir.iterdir():
+            if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGES|SUPPORTED_VIDEOS:
+                files.append(p)
+        # Add files from folders marked with use=true
+        for item in self.dir.iterdir():
+            if item.is_dir() and item.name != TRASH_DIR:
+                if self.data.get(item.name, {}).get("use", False):
+                    for p in item.iterdir():
+                        if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGES|SUPPORTED_VIDEOS:
+                            files.append(p)
+        return files
 
     # ---------------- Media Display ----------------
     def extract_and_store_location(self, file_path):
