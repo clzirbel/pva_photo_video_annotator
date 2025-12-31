@@ -1,7 +1,7 @@
 {
   "_settings": {
     "font_size": 14,
-    "image_time": 5.0
+    "image_time": 1.0
   },
   "PXL_20251015_220836835.jpg": {
     "rotation": 90,
@@ -13,7 +13,7 @@
       },
       "automated_text": "Oakland, California, United States"
     },
-    "creation_time": 1760566116.0
+    "creation_time": "2025/10/15 15:08:36"
   },
   "PXL_20251018_223427037.jpg": {
     "rotation": 0,
@@ -25,7 +25,7 @@
       },
       "automated_text": "San Francisco, California, United States"
     },
-    "creation_time": 1760826867.0
+    "creation_time": "2025/10/18 15:34:27"
   },
   "PXL_20250623_004528789.jpg": {
     "rotation": 0,
@@ -37,7 +37,7 @@
       },
       "automated_text": "Pacific Grove, California, United States"
     },
-    "creation_time": 1750639528.0
+    "creation_time": "2025/06/22 17:45:28"
   },
   "PXL_20250601_222146140.jpg": {
     "rotation": 0,
@@ -49,7 +49,7 @@
       },
       "automated_text": "California, United States"
     },
-    "creation_time": 1748816506.0
+    "creation_time": "2025/06/01 15:21:46"
   },
   "PXL_20230728_175225112.mp4": {
     "text": "",
@@ -89,10 +89,8 @@
         "skip": true
       }
     ],
-    "location": {
-      "manual_text": "Big Basin park, California, United States"
-    },
-    "creation_time": 1767168294.4434466
+    "location": {},
+    "creation_time": "2023/07/28 17:53:15"
   },
   "France": {
     "use": true
@@ -107,7 +105,7 @@
       },
       "automated_text": "Marseille, Provence-Alpes-C\u00f4te d'Azur, France"
     },
-    "creation_time": 1679519889.0
+    "creation_time": "2023/03/22 14:18:09"
   },
   "PXL_20230324_155705728.jpg": {
     "rotation": 0,
@@ -119,11 +117,11 @@
       },
       "automated_text": "Marseille, Provence-Alpes-C\u00f4te d'Azur, France"
     },
-    "creation_time": 1679702225.0
+    "creation_time": "2023/03/24 16:57:05"
   },
   "PXL_20230328_135543810.jpg": {
     "rotation": 0,
-    "text": "Typical look of a village in Alsace\n2\n3\n4\n5\n6\n",
+    "text": "Typical look of a village in Alsace\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6 in case you want to have a lot of lines of annotations!  They should scroll during the slideshow.\n",
     "location": {
       "latitude_longitude": {
         "latitude": 48.16731,
@@ -131,7 +129,7 @@
       },
       "automated_text": "Riquewihr, Grand Est, France"
     },
-    "creation_time": 1680044143.0
+    "creation_time": "2023/03/28 15:55:43"
   },
   "PXL_20230331_090338930.jpg": {
     "text": "",
@@ -142,7 +140,7 @@
       },
       "automated_text": "Strasbourg, Grand Est, France"
     },
-    "creation_time": 1680285818.0
+    "creation_time": "2023/03/31 11:03:38"
   },
   "image_to_set_aside.png": {
     "rotation": 0,
@@ -159,29 +157,29 @@
     "text": "",
     "location": {},
     "skip": true,
-    "creation_time": 1767201521.0208082
+    "creation_time": "2025/12/31 09:18:41"
   },
   "image_to_skip_2.gif": {
     "rotation": 0,
     "text": "",
     "location": {},
     "skip": true,
-    "creation_time": 1767201521.133959
+    "creation_time": "2025/12/31 09:18:41"
   },
   "image_from_paint.gif": {
     "rotation": 0,
     "text": "",
     "location": {},
-    "creation_time": 1767202057.9072113
+    "creation_time": "2025/12/31 09:27:37"
   },
   "screen_grab.png": {
     "rotation": 0,
     "text": "",
     "location": {},
-    "creation_time": 1767202175.7916822
+    "creation_time": "2025/12/31 09:29:35"
   },
   "image_from_paint_with_very_very_very_very_super_crazy_long_filename_that_does_not_wrap.gif": {
     "location": {},
-    "creation_time": 1767202058.0524397
+    "creation_time": "2025/12/31 09:27:38"
   }
 }
