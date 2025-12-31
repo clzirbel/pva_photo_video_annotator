@@ -19,15 +19,46 @@ TRASH_DIR = "set_aside"
 DEFAULT_FONT_SIZE = 14
 DEFAULT_IMAGE_TIME = 5  # seconds per image
 
-def get_file_creation_time(path):
-    """Get file creation time, cross-platform compatible."""
+def get_exif_datetime(path):
+    """Extract DateTimeOriginal from EXIF data. Returns Unix timestamp or 0 if not found."""
     try:
+        if path.suffix.lower() not in SUPPORTED_IMAGES:
+            return 0
+        img = Image.open(path)
+        exif = img._getexif()
+        if not exif:
+            return 0
+        # Look for DateTimeOriginal (tag 36867) - the actual photo taken date
+        datetime_original = exif.get(36867)
+        if datetime_original:
+            # EXIF datetime format: "YYYY:MM:DD HH:MM:SS"
+            dt_obj = datetime.strptime(datetime_original, "%Y:%m:%d %H:%M:%S")
+            return dt_obj.timestamp()
+    except:
+        pass
+    return 0
+
+def get_file_creation_time(path):
+    """Get file creation time - prioritizes EXIF datetime, then uses earliest filesystem timestamp.
+    This corresponds to when the file was actually created/taken, not when it was downloaded or edited."""
+    try:
+        # First, try to get EXIF datetime (most reliable for photos)
+        exif_time = get_exif_datetime(path)
+        if exif_time > 0:
+            return exif_time
+        
+        # Fall back to filesystem timestamps
         stat = path.stat()
-        # Try birthtime first (macOS and some Linux filesystems)
+        times = []
+        
+        # Collect all available timestamps
         if hasattr(stat, 'st_birthtime'):
-            return stat.st_birthtime
-        # Fall back to ctime (creation time on Windows, metadata change time on Linux)
-        return stat.st_ctime
+            times.append(stat.st_birthtime)  # Birth time (creation date on macOS and some filesystems)
+        times.append(stat.st_mtime)  # Modification time (when file was last modified)
+        times.append(stat.st_ctime)  # Change/creation time (depends on OS and file operation)
+        
+        # Return the earliest timestamp
+        return min(times)
     except:
         return 0
 
@@ -360,12 +391,18 @@ class PVAnnotator(QWidget):
         if "creation_time_manual" in entry:
             return entry["creation_time_manual"]
 
-        # Check if we have cached creation time
-        if "creation_time" in entry:
+        # Check if we have cached creation time (skip if null)
+        if "creation_time" in entry and entry["creation_time"] is not None:
             return entry["creation_time"]
 
         # Get from filesystem and cache it
         creation_time = get_file_creation_time(file_path)
+        
+        # If no valid creation time found, use default date (2100-01-01 00:10:00) to sort files to the end
+        if creation_time == 0:
+            default_date = datetime(2100, 1, 1, 0, 10, 0).timestamp()
+            creation_time = default_date
+        
         entry["creation_time"] = creation_time
         return creation_time
 
