@@ -117,6 +117,7 @@ Click the **Slideshow** button to automatically cycle through your media files:
 - **Images**: Each image displays for the configured amount of time (default: 5 seconds), or longer if you've added text annotations (read time is factored in)
 - **Videos**: Each video plays to completion before automatically advancing to the next file
 - **Stop Slideshow**: Click the button again to stop the slideshow at any time
+- **Adjust Timing**: Use the editable text field next to the Slideshow button to change how many seconds each image displays. Type a new number (e.g., "10 seconds") and press Enter. The setting is saved and will be used for all future slideshows.
 
 The slideshow is perfect for reviewing your entire photo/video collection quickly.
 
@@ -135,16 +136,20 @@ The rotation preference is saved with the image and will be remembered the next 
 
 ### Skip Files
 
-Click the **Skip** button to hide a media file from view. The file is marked as skipped in the annotations and will be automatically passed over when navigating.
+Click the **Skip** button to hide a media file from view. The file is marked as skipped in the annotations and will be automatically passed over when navigating forward or backward.
 
 - The file is not deleted
 - It's stored in the `annotations.json` with `"skip": true`
+- Both Next and Previous buttons will skip over these files
 - Use this for files you want to ignore without permanently deleting them
 
 ### Set Aside Files
 
-Click the **Set Aside** button to move a file to a `set_aside` subfolder in your media directory.
+Click the **Set Aside** button to move a file to a `set_aside` subfolder:
 
+- The file is moved to a `set_aside` folder in the same directory where the file is located
+- For files in the main directory: moved to `main_directory/set_aside/`
+- For files in subfolders: moved to `subfolder/set_aside/` (keeps files organized by their original location)
 - The file is physically moved (not just marked as skipped)
 - You can recover files by moving them back out of the set_aside folder manually
 - Use this when you're sure you don't want a file
@@ -261,10 +266,14 @@ All annotations, metadata, and preferences are stored in a JSON file (`annotatio
 Each media file gets an entry in the JSON with:
 - `text`: Text annotation (images) or time-stamped annotations (videos)
 - `skip`: Whether the file should be skipped (images) or skip points (videos)
-- `rotation`: Image rotation in degrees (0, 90, 180, or 270)
-- `volume`: Video volume level (0-100)
+- `rotation`: Image rotation in degrees (0, 90, 180, or 270) - only stored if non-zero
+- `volume`: Video volume level (0-100) - only stored if not 100%
 - `location`: GPS coordinates and location information
 - `annotations`: Array of time-stamped annotations (videos)
+
+The application also stores settings in the `_settings` object:
+- `image_time`: Number of seconds each image displays during slideshow (default: 5)
+- `font_size`: Font size for text (default: 14)
 
 ## Tips and Tricks
 
