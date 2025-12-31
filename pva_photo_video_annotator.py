@@ -5,7 +5,7 @@ from bisect import bisect_right
 import requests
 from tinytag import TinyTag
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton,
-    QTextEdit, QVBoxLayout, QHBoxLayout, QComboBox, QSlider, QFileDialog, QMessageBox)
+    QTextEdit, QVBoxLayout, QHBoxLayout, QComboBox, QSlider, QFileDialog, QMessageBox, QLineEdit)
 from PySide6.QtCore import Qt, QTimer, QUrl, QPoint
 from PySide6.QtGui import QPixmap, QImage, QFont
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -122,18 +122,18 @@ def reverse_geocode_nominatim(lat, lon):
 
 def load_image(path, rotation):
     img = Image.open(path)
-    
+
     # Apply EXIF orientation if available (returns None if no EXIF, so use 'or img')
     img = ImageOps.exif_transpose(img) or img
-    
+
     # Apply user rotation on top of EXIF orientation
-    if rotation: 
+    if rotation:
         img = img.rotate(rotation, expand=True)
-    
+
     # Ensure RGB mode for consistency
     if img.mode != 'RGB':
         img = img.convert("RGB")
-    
+
     # Convert PIL image to QImage with proper stride alignment
     width, height = img.size
     img_data = img.tobytes()
@@ -210,6 +210,12 @@ class PVAnnotator(QWidget):
         self.rotate_btn=QPushButton("Rotate")
         self.volume_btn=QPushButton("100% volume")
         self.slide_btn=QPushButton("Slideshow")
+        self.image_time_input=QLineEdit()
+        self.image_time_input.setFixedWidth(88)
+        self.image_time_input.setFont(QFont("Arial",12))
+        self.image_time_input.setAlignment(Qt.AlignLeft)
+        self.image_time_input.setText(f"{DEFAULT_IMAGE_TIME} seconds")
+        self.image_time_input.editingFinished.connect(self.update_image_time)
         self.next_btn=QPushButton("Next")
         # Make button text bold
         bold_font = QFont()
@@ -226,7 +232,7 @@ class PVAnnotator(QWidget):
         self.location_combo=QComboBox(); self.location_combo.setEditable(True)
         self.location_combo.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
         self.location_combo.currentTextChanged.connect(self.update_location_text)
-        self.text_box=QTextEdit(); self.text_box.setFixedHeight(60)
+        self.text_box=QTextEdit(); self.text_box.setFixedHeight(75)
         self.text_box.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
 
         self.skip_in_progress = False
@@ -270,7 +276,9 @@ class PVAnnotator(QWidget):
         layout.addLayout(video_btn_layout)
         button_layout=QHBoxLayout()
         button_layout.setSpacing(2)
-        for b in [self.prev_btn,self.skip_btn,self.trash_btn,self.rotate_btn,self.volume_btn,self.slide_btn,self.next_btn]: button_layout.addWidget(b)
+        for b in [self.prev_btn,self.skip_btn,self.trash_btn,self.rotate_btn,self.volume_btn,self.slide_btn]: button_layout.addWidget(b)
+        button_layout.addWidget(self.image_time_input)
+        button_layout.addWidget(self.next_btn)
         layout.addLayout(button_layout)
         meta_layout=QHBoxLayout()
         meta_layout.setSpacing(2)
@@ -315,6 +323,9 @@ class PVAnnotator(QWidget):
         for entry in self.data.values():
             if "annotations" in entry:
                 entry["annotations"]=sorted(entry["annotations"],key=lambda a: a["time"])
+        # Update image time display
+        image_time = self.get_image_time()
+        self.image_time_input.setText(f"{image_time} seconds")
         self.show_item()
 
     # ---------------- Helpers ----------------
@@ -412,7 +423,6 @@ class PVAnnotator(QWidget):
     def show_item(self):
         if not self.media: return
         p=self.current(); entry=self.data.setdefault(p.name,{"rotation":0,"text":""})
-        if entry.get("skip", False): self.next_item(); return
 
         # Extract location data if available
         self.extract_and_store_location(p)
@@ -451,7 +461,8 @@ class PVAnnotator(QWidget):
             self.volume_btn.hide()
             self.image_label.show()
             rot=entry.get("rotation",get_exif_rotation(p))
-            pix=load_image(p,rot)
+            qimg=load_image(p,rot)
+            pix=QPixmap.fromImage(qimg)
             self.image_label.setPixmap(pix.scaled(800,600,Qt.KeepAspectRatio))
             self.video_player.stop()
         else:
@@ -715,13 +726,49 @@ class PVAnnotator(QWidget):
         self.data.setdefault(p.name,{}).setdefault("location",{})["manual_text"]=text
         self.save()
 
+    def update_image_time(self):
+        """Parse image time input and save to settings."""
+        text = self.image_time_input.text()
+        # Extract numbers from the text, split by spaces, take first number
+        words = text.split()
+        for word in words:
+            # Strip out non-numeric characters
+            num_str = ''.join(c for c in word if c.isdigit())
+            if num_str:
+                try:
+                    new_time = int(num_str)
+                    if new_time > 0:
+                        self.data.setdefault("_settings", {})["image_time"] = new_time
+                        self.image_time_input.setText(f"{new_time} seconds")
+                        self.save()
+                        return
+                except ValueError:
+                    pass
+        # If no valid number found, reset to current value
+        current_time = self.get_image_time()
+        self.image_time_input.setText(f"{current_time} seconds")
+
     # ---------------- Navigation ----------------
     def next_item(self):
         self.index=(self.index+1)%len(self.media)
+        # Skip over any files marked as skip=true
+        start_index = self.index
+        while self.data.get(self.media[self.index].name, {}).get("skip", False):
+            self.index=(self.index+1)%len(self.media)
+            # Prevent infinite loop if all files are skipped
+            if self.index == start_index:
+                break
         self.show_item()
 
     def prev_item(self):
         self.index=(self.index-1)%len(self.media)
+        # Skip over any files marked as skip=true
+        start_index = self.index
+        while self.data.get(self.media[self.index].name, {}).get("skip", False):
+            self.index=(self.index-1)%len(self.media)
+            # Prevent infinite loop if all files are skipped
+            if self.index == start_index:
+                break
         if self.slideshow: self.toggle_slideshow()
         self.show_item()
 
@@ -772,8 +819,15 @@ class PVAnnotator(QWidget):
         self.save()
 
     def trash_item(self):
-        p=self.current(); shutil.move(str(p),self.trash/p.name)
-        self.media.remove(p); self.save(); self.show_item()
+        p=self.current()
+        # Create set_aside folder in the same directory as the file
+        file_parent = p.parent
+        trash_dir = file_parent / TRASH_DIR
+        trash_dir.mkdir(exist_ok=True)
+        shutil.move(str(p), trash_dir / p.name)
+        self.media.remove(p)
+        self.save()
+        self.show_item()
 
     def toggle_slideshow(self):
         self.slideshow=not self.slideshow
