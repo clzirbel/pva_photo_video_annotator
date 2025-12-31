@@ -276,6 +276,14 @@ class PVAnnotator(QWidget):
 
     # ---------------- Helpers ----------------
     def current(self): return self.media[self.index]
+
+    def get_relative_path(self, file_path):
+        """Get relative path from self.dir for display, e.g., 'France/photo.jpg'."""
+        try:
+            return str(file_path.relative_to(self.dir))
+        except ValueError:
+            return file_path.name
+
     def save(self):
         # Build a fast lookup set of video filenames for O(1) lookup
         video_names = {p.name for p in self.media if p.suffix.lower() in SUPPORTED_VIDEOS}
@@ -375,7 +383,8 @@ class PVAnnotator(QWidget):
         self.extract_and_store_location(p)
 
         ts=datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d | %H:%M:%S")
-        self.meta_label.setText(f"{ts} | {p.name}")
+        display_path = self.get_relative_path(p)
+        self.meta_label.setText(f"{ts} | {display_path}")
 
         # Dropdown locations
         manual_locations=list({self.data[f].get("location",{}).get("manual_text","") for f in self.data if "location" in self.data[f]})
