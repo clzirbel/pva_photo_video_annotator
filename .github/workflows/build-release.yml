@@ -1,8 +1,12 @@
-name: Build executables for release
+name: Build executables for tagged release
 
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # REQUIRED to create releases
 
 jobs:
   build:
@@ -13,11 +17,9 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -26,14 +28,50 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller
 
-      - name: Build executable
+      - name: Build executable (Windows)
+        if: runner.os == 'Windows'
         run: |
-          pyinstaller --onefile --name PVA_Photo_and_Video_Annotator pva_photo_video_annotator.py
+          pyinstaller --onefile --windowed ^
+            --icon app_icon.ico ^
+            --name PVA_Photo_and_Video_Annotator ^
+            pva_photo_video_annotator.py
 
-      - name: Upload artifact to release
+      - name: Create macOS icns icon
+        if: runner.os == 'macOS'
+        run: |
+          mkdir AppIcon.iconset
+
+          sips -z 16 16     app_icon.png --out AppIcon.iconset/icon_16x16.png
+          sips -z 32 32     app_icon.png --out AppIcon.iconset/icon_16x16@2x.png
+          sips -z 32 32     app_icon.png --out AppIcon.iconset/icon_32x32.png
+          sips -z 64 64     app_icon.png --out AppIcon.iconset/icon_32x32@2x.png
+          sips -z 128 128   app_icon.png --out AppIcon.iconset/icon_128x128.png
+          sips -z 256 256   app_icon.png --out AppIcon.iconset/icon_128x128@2x.png
+          sips -z 256 256   app_icon.png --out AppIcon.iconset/icon_256x256.png
+          sips -z 512 512   app_icon.png --out AppIcon.iconset/icon_256x256@2x.png
+          sips -z 512 512   app_icon.png --out AppIcon.iconset/icon_512x512.png
+          sips -z 1024 1024 app_icon.png --out AppIcon.iconset/icon_512x512@2x.png
+
+          iconutil -c icns AppIcon.iconset -o app_icon.icns
+
+      - name: Build executable (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --onefile --windowed \
+            --icon app_icon.icns \
+            --name PVA_Photo_and_Video_Annotator \
+            pva_photo_video_annotator.py
+
+      - name: Build executable (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          pyinstaller --onefile \
+            --icon app_icon.png \
+            --name PVA_Photo_and_Video_Annotator \
+            pva_photo_video_annotator.py
+
+      - name: Create GitHub release and upload assets
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/PVA_Photo_and_Video_Annotator*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          files: dist/PVA_Photo_and_Video_Annotator*
