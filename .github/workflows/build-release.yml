@@ -31,9 +31,9 @@ jobs:
       - name: Build executable (Windows)
         if: runner.os == 'Windows'
         run: |
-          pyinstaller --onefile --windowed ^
-            --icon app_icon.ico ^
-            --name PVA_Photo_and_Video_Annotator ^
+          pyinstaller --onefile --windowed `
+            --icon app_icon.ico `
+            --name PVA_Photo_and_Video_Annotator `
             pva_photo_video_annotator.py
 
       - name: Create macOS icns icon
