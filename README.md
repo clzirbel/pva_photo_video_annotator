@@ -1,19 +1,19 @@
 # PVA Photo and Video Annotator
 
-A simple yet powerful tool for viewing, organizing, and annotating photos and videos. The PVA Photo and Video Annotator lets you browse through media files in a folder, add detailed annotations to images and videos, skip unwanted segments, and organize your media collection with ease.
+PVA is a simple yet powerful tool for viewing, organizing, and annotating photos and videos. The PVA Photo and Video Annotator lets you browse through media files in a folder, add detailed annotations to images and videos, skip unwanted segments of videos, and organize your media collection with ease.
 
 ## Features
 
 - **Browse Media**: View photos and videos from any folder (including subfolders) with a clean, intuitive interface
-- **Subfolder Support**: When opening a directory, you'll be prompted for each subfolder - choose to include or exclude files from each one
+- **Subfolder Support**: When opening a folder, you'll be prompted for each subfolder to choose to include or exclude the files from each one
 - **Organize Media**: Quickly hide unwanted files or move them to a "Set Aside" folder
 - **Image Annotations**: Add text descriptions to photos
 - **Video Annotations**: Add time-stamped text annotations throughout videos
 - **Skip Video Segments**: Mark parts of videos to be automatically skipped during playback
-- **Location Tagging**: Automatically extract GPS coordinates from photos and reverse-geocode them to city/state/country, or add locations manually
+- **Location Tagging**: Automatically extract GPS coordinates from photos and reverse-geocode them to city/state/country, or add locations manually by typing them or by choosing from a dropdown of values from the folder
 - **Volume Control**: Adjust video volume on a per-file basis
 - **Image Rotation**: Rotate photos that have incorrect orientation
-- **Persistent Storage**: All annotations and metadata are saved to a JSON file
+- **Persistent Storage**: All annotations and metadata are saved to a text file in JSON format, using minimal disk space
 
 ## Getting Started
 
@@ -21,88 +21,18 @@ A simple yet powerful tool for viewing, organizing, and annotating photos and vi
 
 The easiest way to get started is to download the pre-built Windows executable:
 
-1. Go to the [Releases](https://github.com/yourusername/pva_photo_video_annotator/releases) page
-2. Download the latest `PVA Photo and Video Annotator.exe` file
-3. Run the `.exe` file directly - **no Python installation required**
-4. Select a folder with your photos and videos to begin annotating
+1. Go to the [Releases](https://github.com/clzirbel/pva_photo_video_annotator/releases) page
+2. Download the latest `PVA Photo and Video Annotator.exe` file and store in Documents or C:\
+3. Run the `.exe` file by double-clicking it
+4. If Windows objects, click More Info and then Run Anyway
+5. Select a folder with your photos and videos to begin annotating
 
-The executable runs on any Windows machine without requiring Python or any additional setup.
+The executable runs on any Windows machine without requiring Python or any additional setup.  Once you run it once, you can alternatively right click an image or video file in a folder, Open With, Browse for additional programs, and select PVA_Photo_and_Video_Annotator.exe.
 
-### Alternative: Run as Python Project
+Your folder of images and videos can have subfolders with additional images and videos; the program will first ask you which sub-folders to consider.
 
-If you prefer to run the application as a Python project (for development or customization), follow these steps:
+If you prefer to run the application as a Python project (for development or customization), follow the steps at the end of this file.
 
-#### Requirements
-
-- **Python 3.8 or higher** (tested with Python 3.11)
-- All required packages are listed in `requirements.txt`
-
-#### Installation
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/yourusername/pva_photo_video_annotator.git
-   cd pva_photo_video_annotator
-   ```
-
-2. **Install dependencies:**
-
-   **For Python 3.11+ (standard installation):**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-   **For Python 3.8 or 3.9:**
-   ```bash
-   python -m pip install -r requirements.txt
-   ```
-
-   **For multiple Python versions on the same system:**
-
-   If you have multiple Python versions installed, you can specify which version to use:
-
-   ```bash
-   # For Python 3.8
-   python3.8 -m pip install -r requirements.txt
-
-   # For Python 3.9
-   python3.9 -m pip install -r requirements.txt
-
-   # For Python 3.10
-   python3.10 -m pip install -r requirements.txt
-
-   # For Python 3.11
-   python3.11 -m pip install -r requirements.txt
-   ```
-
-   **Using a virtual environment (recommended):**
-   ```bash
-   # Create a virtual environment
-   python -m venv venv
-
-   # Activate it
-   # On Windows:
-   venv\Scripts\activate
-   # On macOS/Linux:
-   source venv/bin/activate
-
-   # Install dependencies
-   pip install -r requirements.txt
-   ```
-
-3. **Run the application:**
-   ```bash
-   python pva_photo_video_annotator.py
-   ```
-
-### Dependencies
-
-The application requires the following Python packages:
-
-- **PySide6** (≥6.4.0): Qt framework for the GUI
-- **requests** (≥2.28.0): HTTP library for location reverse-geocoding
-- **tinytag** (≥1.9.0): Audio/video metadata extraction (for video duration)
-- **Pillow** (≥9.0.0): Image processing library
 
 When you launch the application, select a folder containing your photos and videos. You'll be prompted to confirm which subfolders to include in your media library. The program will read any existing annotations from an `annotations.json` file in that folder, or create one if it doesn't exist.
 
@@ -314,3 +244,77 @@ The application also stores settings in the `_settings` object:
 - **Location Dropdowns**: The location dropdown shows all previously used locations, making it easy to tag files consistently
 - **Timestamps**: Hover over the video progress bar to see the exact timestamp at any point
 - **Volume Adjustments**: You can change volume while a video is playing; the change applies immediately
+
+### Alternative: Run as Python Project
+
+#### Python Requirements
+
+- **Python 3.8 or higher** (tested with Python 3.11)
+- All required packages are listed in `requirements.txt`
+
+#### Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/yourusername/pva_photo_video_annotator.git
+   cd pva_photo_video_annotator
+   ```
+
+2. **Install dependencies:**
+
+   **For Python 3.11+ (standard installation):**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+   **For Python 3.8 or 3.9:**
+   ```bash
+   python -m pip install -r requirements.txt
+   ```
+
+   **For multiple Python versions on the same system:**
+
+   If you have multiple Python versions installed, you can specify which version to use:
+
+   ```bash
+   # For Python 3.8
+   python3.8 -m pip install -r requirements.txt
+
+   # For Python 3.9
+   python3.9 -m pip install -r requirements.txt
+
+   # For Python 3.10
+   python3.10 -m pip install -r requirements.txt
+
+   # For Python 3.11
+   python3.11 -m pip install -r requirements.txt
+   ```
+
+   **Using a virtual environment (recommended):**
+   ```bash
+   # Create a virtual environment
+   python -m venv venv
+
+   # Activate it
+   # On Windows:
+   venv\Scripts\activate
+   # On macOS/Linux:
+   source venv/bin/activate
+
+   # Install dependencies
+   pip install -r requirements.txt
+   ```
+
+3. **Run the application:**
+   ```bash
+   python pva_photo_video_annotator.py
+   ```
+
+### Dependencies
+
+The application requires the following Python packages:
+
+- **PySide6** (≥6.4.0): Qt framework for the GUI
+- **requests** (≥2.28.0): HTTP library for location reverse-geocoding
+- **tinytag** (≥1.9.0): Audio/video metadata extraction (for video duration)
+- **Pillow** (≥9.0.0): Image processing library
