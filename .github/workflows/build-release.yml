@@ -36,12 +36,6 @@ jobs:
             --name PVA_Photo_and_Video_Annotator ^
             pva_photo_video_annotator.py
 
-      - name: Debug files
-        if: runner.os == 'macOS'
-        run: |
-          pwd
-          ls -la
-
       - name: Create macOS icns icon
         if: runner.os == 'macOS'
         run: |
