@@ -666,6 +666,7 @@ class PVAnnotator(QWidget):
         self.audio_output=QAudioOutput()
         self.video_player.setAudioOutput(self.audio_output)
         self.video_player.setVideoOutput(self.video_widget)
+        self.seek_in_progress = False
         self.video_slider=TimestampSlider()
         self.slider_style_default = """
             QSlider::groove:horizontal { background: #2a82da; height: 6px; border-radius: 3px; }
@@ -1050,6 +1051,9 @@ class PVAnnotator(QWidget):
             volume = entry.get("volume", 100)
             self.audio_output.setVolume(volume / 100.0)
             self.volume_btn.setText(f"{volume}% volume")
+            # Full reset: stop any current playback and reload source
+            self.video_player.stop()
+            self.video_player.setSource(QUrl())
             self.video_player.setSource(QUrl.fromLocalFile(str(p)))
             # Use a single-shot timer to allow the source to load before playing
             QTimer.singleShot(100, self.video_player.play)
@@ -1094,7 +1098,52 @@ class PVAnnotator(QWidget):
             self.save()
         return annotations
 
+    def safe_seek(self, pos_ms, play_brief=False):
+        """Programmatic seek that keeps slider and frames in sync, avoiding black screens."""
+        self.seek_in_progress = True
+        try:
+            self.video_player.pause()
+            self.video_player.setPosition(pos_ms)
+            self.video_slider.setValue(pos_ms)
+
+            def finalize():
+                self.video_player.pause()
+                self.video_slider.setValue(min(pos_ms, self.video_player.duration() or pos_ms))
+                self.seek_in_progress = False
+                # Refresh annotation text for the new position
+                self.update_video_annotation(self.video_player.position())
+
+            if play_brief:
+                self.video_player.play()
+                QTimer.singleShot(80, finalize)
+            else:
+                finalize()
+        except Exception:
+            self.seek_in_progress = False
+
+    def jump_to_end_and_pause(self):
+        """Seek to final frame and pause, keeping the last frame visible."""
+        dur = self.video_player.duration()
+        if dur <= 0:
+            return
+        # Seek slightly before the exact end to keep a frame available
+        target = max(dur - 100, 0)
+        self.safe_seek(target, play_brief=True)
+
+    def jump_to_end_and_pause(self):
+        """Seek to final frame and pause, keeping the last frame visible."""
+        dur = self.video_player.duration()
+        if dur <= 0:
+            return
+        end_pos = max(dur - 1, 0)  # stay within duration; 1 ms before end keeps last frame
+        self.video_player.setPosition(end_pos)
+        self.video_slider.setValue(end_pos)
+        self.video_player.pause()
+
     def update_video_annotation(self, pos):
+
+        if self.seek_in_progress:
+            return
 
         if hasattr(self, "editing_annotation"):
             # Skip updating the text box while editing
@@ -1136,18 +1185,16 @@ class PVAnnotator(QWidget):
             playback = self.video_player.playbackState() == QMediaPlayer.PlayingState
 
             if playback:
-                # Skip automatically
+                # Skip automatically to next annotation or pause at end
                 if i + 1 < len(annotations):
                     next_time = annotations[i + 1]["time"]
-                    self.video_player.setPosition(int(next_time * 1000))
+                    next_pos = int(next_time * 1000)
+                    self.video_player.setPosition(next_pos)
+                    self.video_slider.setValue(next_pos)
+                    # Continue playing after skip
                 else:
-                    # Last annotation: jump to video end
-                    dur = self.video_player.duration()
-                    if dur > 0:
-                        self.video_player.setPosition(dur)
-                    else:
-                        self.video_player.setPosition(self.video_player.position() + 1000)  # 1 sec ahead
-                    # Make sure text shows "Segment skipped"
+                    # Last annotation: just pause here
+                    self.video_player.pause()
                     self.text_box.blockSignals(True)
                     self.text_box.setText(ann.get("text", "Segment skipped"))
                     self.text_box.blockSignals(False)
@@ -1192,11 +1239,9 @@ class PVAnnotator(QWidget):
         # Jump to next annotation if exists, else pause at end
         next_ann = next((a for a in annotations if a["time"] > pos_sec), None)
         if next_ann:
-            self.video_player.setPosition(int(next_ann["time"] * 1000))
-        else:
-            dur = self.video_player.duration()
-            if dur > 0:
-                self.video_player.setPosition(dur)
+            next_pos = int(next_ann["time"] * 1000)
+            self.video_player.setPosition(next_pos)
+            self.video_slider.setValue(next_pos)
         self.video_player.pause()
         self.update_video_annotation(self.video_player.position())
 
@@ -1738,7 +1783,18 @@ class PVAnnotator(QWidget):
         else: self.video_player.play()
 
     def replay_video(self):
-        self.video_player.setPosition(0); self.video_player.play()
+        """Completely reset video and replay from start."""
+        p = self.current()
+        if p.suffix.lower() in SUPPORTED_VIDEOS:
+            # Full reset: stop, clear source completely, then reload to clear decoder state
+            self.video_player.stop()
+            self.video_player.setSource(QUrl())  # Clear source first
+            QTimer.singleShot(10, lambda: self._replay_video_continue(p))
+
+    def _replay_video_continue(self, p):
+        """Second stage of replay: reload and play."""
+        self.video_player.setSource(QUrl.fromLocalFile(str(p)))
+        QTimer.singleShot(100, lambda: (self.video_player.setPosition(0), self.video_player.play()))
 
     # ---------------- Keyboard ----------------
     def keyPressEvent(self,event):
