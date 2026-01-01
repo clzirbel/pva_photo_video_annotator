@@ -1,6 +1,6 @@
 # PVA Photo and Video Annotator
 
-PVA is a simple yet powerful tool for viewing, organizing, and annotating photos and videos. The PVA Photo and Video Annotator lets you browse through media files in a folder, add detailed annotations to images and videos, skip unwanted segments of videos, and organize your media collection with ease.
+PVA is a simple yet powerful tool for viewing, organizing, and annotating photos and videos. The PVA Photo and Video Annotator lets you click through media files in a folder, add detailed annotations to images and videos, skip unwanted segments of videos, and view the results as a slideshow. Your media files are not altered, and the text annotations you add are stored in an efficient format.
 
 ## Features
 
@@ -19,24 +19,25 @@ PVA is a simple yet powerful tool for viewing, organizing, and annotating photos
 
 ### Quick Start: Windows Executable (Recommended)
 
-The easiest way to get started is to download the pre-built Windows executable:
+The easiest way to get started on Windows is to download the pre-built Windows executable:
 
-1. Go to the [Releases](https://github.com/clzirbel/pva_photo_video_annotator/releases) page
-2. Download the latest `PVA Photo and Video Annotator.exe` file and store in Documents or C:\
-3. Run the `.exe` file by double-clicking it
+1. Go to the [Releases](https://github.com/clzirbel/pva_photo_video_annotator/releases) page, find the most recent release, and view its Assets
+2. Download the `PVA Photo and Video Annotator.exe` file and store in Documents or C:\
+3. Run `PVA Photo and Video Annotator.exe` file by double clicking it
 4. If Windows objects, click More Info and then Run Anyway
 5. Select a folder with your photos and videos to begin annotating
 
-The executable runs on any Windows machine without requiring Python or any additional setup.  Once you run it once, you can alternatively right click an image or video file in a folder, Open With, Browse for additional programs, and select PVA_Photo_and_Video_Annotator.exe.
-
-Your folder of images and videos can have subfolders with additional images and videos; the program will first ask you which sub-folders to consider.
+The executable runs on any Windows machine without requiring Python or any additional setup.  After you run it once, you can alternatively right click an image or video file in a folder, Open With, Browse for additional programs, and select PVA_Photo_and_Video_Annotator.exe.
 
 If you prefer to run the application as a Python project (for development or customization), follow the steps at the end of this file.
 
+### Folder organization ###
 
-When you launch the application, select a folder containing your photos and videos. You'll be prompted to confirm which subfolders to include in your media library. The program will read any existing annotations from an `annotations.json` file in that folder, or create one if it doesn't exist.
+Your folder of images and videos can have subfolders with additional images and videos; the program will first ask you which sub-folders to consider. Generally, it is good to use the program on a folder with a single coherent theme, rather than on multiple loosely related folders.
 
-### Supported Formats
+When you launch the application, select the folder containing your photos and videos. You'll be prompted to confirm which subfolders to include in your annotation project. The program will read any existing annotations from an `annotations.json` file in that folder, or create one if it doesn't exist.
+
+### Supported Image and Video Formats
 
 **Images**: JPG, JPEG, PNG, GIF, BMP, TIFF, TIF, WebP
 
@@ -55,6 +56,8 @@ Use the **Next** and **Previous** buttons to navigate through your media files o
   - For photos: EXIF datetime is used (the actual date the photo was taken)
   - For files without EXIF data: The earliest filesystem timestamp is used (handles Google Photos and other downloaded files correctly)
   - You can manually edit any creation date by clicking on the date field and entering a new date in `YYYY-MM-DD HH:MM:SS` format
+  - Manually editing the creation date is useful, for example, if you splice in a downloaded stock image to be part of the slideshow.
+  - No other sorting criterion is supported at this time.
 
 When you navigate to a video, it will automatically start playing.
 
@@ -62,12 +65,11 @@ When you navigate to a video, it will automatically start playing.
 
 Click the **Slideshow** button to automatically cycle through your media files:
 
-- **Images**: Each image displays for the configured amount of time (default: 5 seconds), or longer if you've added text annotations (read time is factored in)
+- **Images**: Each image displays for the configured amount of time (default: 5 seconds), or longer if you've added text annotations (annotation text length is factored in)
 - **Videos**: Each video plays to completion before automatically advancing to the next file
 - **Stop Slideshow**: Click the button again to stop the slideshow at any time
 - **Adjust Timing**: Use the editable text field next to the Slideshow button to change how many seconds each image displays. Type a new number (e.g., "10 seconds") and press Enter. The setting is saved and will be used for all future slideshows.
-
-The slideshow is perfect for reviewing your entire photo/video collection quickly.
+- **Quick View**: Use a delay time of 1 second or less to have PVA quickly advance through images and videos; this can help you understand the organization.
 
 ## Organizing Your Media
 
@@ -78,18 +80,18 @@ Click the **Rotate** button (only available for images) to rotate a photo clockw
 - First click: 90° rotation
 - Second click: 180° rotation
 - Third click: 270° rotation
-- Fourth click: Returns to 0° (original orientation, removes from file)
+- Fourth click: Returns to 0° (original orientation)
 
-The rotation preference is saved with the image and will be remembered the next time you view it.
+The rotation preference is saved for the image in the JSON file and will be remembered the next time you view it.
 
 ### Skip Files
 
 Click the **Skip** button to hide a media file from view. The file is marked as skipped in the annotations and will be automatically passed over when navigating forward or backward.
 
-- The file is not deleted
-- It's stored in the `annotations.json` with `"skip": true`
+- The file is not deleted or moved
+- The skip information is stored in `annotations.json` with `"skip": true`
 - Both Next and Previous buttons will skip over these files
-- Use this for files you want to ignore without permanently deleting them
+- Use this for files you want to ignore without deleting or moving them
 
 ### Set Aside Files
 
@@ -97,10 +99,10 @@ Click the **Set Aside** button to move a file to a `set_aside` subfolder:
 
 - The file is moved to a `set_aside` folder in the same directory where the file is located
 - For files in the main directory: moved to `main_directory/set_aside/`
-- For files in subfolders: moved to `subfolder/set_aside/` (keeps files organized by their original location)
+- For files in subfolders: moved to `subfolder/set_aside/` (this keeps files organized by their original location)
 - The file is physically moved (not just marked as skipped)
 - You can recover files by moving them back out of the set_aside folder manually
-- Use this when you're sure you don't want a file
+- Use this when you're sure you don't want a file and you may want to delete all of the files in the set_aside folder to save space
 
 ## Location Information
 
@@ -110,18 +112,18 @@ The application automatically extracts GPS coordinates from photo metadata using
 
 When you view a photo with GPS data:
 
-1. The app extracts latitude and longitude from the photo's EXIF metadata
-2. It automatically looks up the address (with a 2-second timeout)
-3. The location is stored as `automated_text` in the JSON file
+1. The application extracts latitude and longitude from the photo's EXIF metadata
+2. It automatically looks up the address
+3. The location is stored as `location.automated_text` in the JSON file
 4. The location appears in the location dropdown
 
 ### Manual Location Entry
 
 You can also manually set or override the location:
 
-1. Click on the location dropdown at the top
+1. Click on the location dropdown on the right side of the screen
 2. Either type a new location or select a previously used location from the list
-3. The location is saved as `manual_text` in the JSON file
+3. The location is saved as `location.manual_text` in the JSON file
 4. If both manual and automated locations exist, the manual location is displayed
 
 The dropdown shows all unique locations (both manual and automated) across all files in your collection, making it easy to maintain consistency.
@@ -132,7 +134,7 @@ For images, you can add and edit a text description:
 
 1. Click in the text box at the bottom of the screen
 2. Type your annotation (e.g., "Family picnic in the park" or technical details about the photo)
-3. Click elsewhere or press tab to save
+3. Click elsewhere indicate that you are done editing
 
 The text is automatically saved to the JSON file under the `text` field for that image.
 
@@ -177,9 +179,9 @@ The text is updated while the timestamp remains unchanged.
 
 To delete an annotation:
 
-1. Pause the video at the time of the annotation you want to remove
+1. Pause the video during the time of the annotation you want to remove
 2. Click **Remove annotation**
-3. The annotation is deleted
+3. The annotation is deleted and the video returns to the previous annotation
 
 ### Skipping Video Segments
 
@@ -189,8 +191,9 @@ To mark a segment of the video to be automatically skipped during playback:
 2. Click **Skip until next annotation**
 3. The video marks this point and jumps to the next annotation (or end of video)
 4. During playback, when this skip point is reached, the video automatically jumps to the next annotation
+5. There is no particular limit to the number of segments that can be skipped
 
-This is useful for removing unwanted sections (background noise, false starts, etc.) without deleting the original video file.
+This is useful for removing unwanted sections (background noise, false starts, etc.) without deleting the original video file.  You can adjust the slider into a skipped segment to remove the skip annotation, if desired, or to start a new annotation where the video should start playing again.
 
 ## Volume Control
 
@@ -200,7 +203,7 @@ For videos, use the **Volume** button (showing the current volume level) to adju
 - The volume preference is saved per video file
 - When you return to a video, it plays at the previously saved volume level
 
-Use this to mute videos with bad background noise or reduce volume for quieter content.
+Use this to mute videos with too much background noise or to reduce or equalize volume for quieter content.
 
 ## Storage and Formats
 
@@ -211,6 +214,8 @@ All annotations, metadata, and preferences are stored in a JSON file (`annotatio
 - Edit annotations manually if needed
 - Use the annotations with other tools
 
+However, be careful with JSON format because the brackets and commas are very important; it is better to avoid editing the JSON file if at all possible.
+
 ### Date and Time Handling
 
 The application intelligently determines creation dates for your media files:
@@ -220,7 +225,7 @@ The application intelligently determines creation dates for your media files:
 - **Manual Override**: You can manually edit any file's creation date by clicking the date field and entering a new date in `YYYY-MM-DD HH:MM:SS` format. This override takes precedence over all automatic detection.
 - **Storage**: Automatic dates are cached in the JSON for performance. Manual dates are stored separately and always used when available.
 
-This approach ensures that files are always sorted in the order they were taken, regardless of whether they were downloaded, emailed, or copied to your collection.
+The goal is that files are always sorted in the order they were taken, regardless of whether they were downloaded, emailed, or copied to your collection.
 
 ### File Entries
 
@@ -239,13 +244,15 @@ The application also stores settings in the `_settings` object:
 ## Tips and Tricks
 
 - **Keyboard Navigation**: Use the arrow keys (→ and ←) to navigate between files quickly
-- **Batch Organization**: Use Next/Previous to go through all files, pressing Skip on unwanted ones
-- **Slideshow for Review**: Use Slideshow mode to review your entire collection at once
+- **Bulk Organization**: Use Next/Previous to go through all files, pressing Skip or Set Aside on unwanted ones
+- **Slideshow for Review**: Use Slideshow mode to review or admire your entire collection at once
 - **Location Dropdowns**: The location dropdown shows all previously used locations, making it easy to tag files consistently
 - **Timestamps**: Hover over the video progress bar to see the exact timestamp at any point
 - **Volume Adjustments**: You can change volume while a video is playing; the change applies immediately
 
-### Alternative: Run as Python Project
+### Run as Python Project
+
+PVA is written entirely in Python using Python packages.
 
 #### Python Requirements
 
