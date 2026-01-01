@@ -8,7 +8,7 @@ from tinytag import TinyTag
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton,
     QTextEdit, QVBoxLayout, QHBoxLayout, QComboBox, QSlider, QFileDialog, QMessageBox, QLineEdit, QProgressDialog)
 from PySide6.QtCore import Qt, QTimer, QUrl, QPoint, QLoggingCategory
-from PySide6.QtGui import QPixmap, QImage, QFont, QColor
+from PySide6.QtGui import QPixmap, QImage, QFont, QColor, QTextCursor
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PIL import Image, ExifTags, ImageOps
@@ -572,7 +572,7 @@ class TimestampSlider(QSlider):
     def mouseMoveEvent(self, event):
         # Calculate the value at the mouse position
         if self.maximum() > 0:
-            x_pos = event.pos().x()
+            x_pos = event.position().x()
             width = self.width()
             value = int((x_pos / width) * self.maximum())
             self.setToolTip(format_time_ms(value))
@@ -584,7 +584,7 @@ class TimestampSlider(QSlider):
         if event.button() == Qt.LeftButton:
             # Calculate value from click position
             if self.maximum() > 0:
-                x_pos = event.pos().x()
+                x_pos = event.position().x()
                 width = self.width()
                 value = int((x_pos / width) * self.maximum())
                 self.setValue(value)
@@ -632,9 +632,9 @@ class PVAnnotator(QWidget):
         for btn in [self.prev_btn, self.skip_btn, self.trash_btn, self.rotate_btn, self.volume_btn, self.slide_btn, self.next_btn]:
             btn.setFont(bold_font)
         for b,f in [(self.prev_btn,self.prev_item),(self.next_btn,self.next_item),
-                    (self.skip_btn,self.skip_item),(self.trash_btn,self.trash_item),
-                    (self.rotate_btn,self.rotate_item),(self.volume_btn,self.change_volume),
-                    (self.slide_btn,self.toggle_slideshow)]: b.clicked.connect(f)
+                (self.skip_btn,self.skip_item),(self.trash_btn,self.trash_item),
+                (self.rotate_btn,self.rotate_item),(self.volume_btn,self.change_volume),
+                (self.slide_btn,self.toggle_slideshow)]: b.clicked.connect(lambda _, func=f: self.handle_button_click(func))
 
         self.datetime_box=QLineEdit(); self.datetime_box.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
         self.datetime_box.editingFinished.connect(self.update_creation_time)
@@ -647,9 +647,11 @@ class PVAnnotator(QWidget):
         self.location_combo.currentTextChanged.connect(self.update_location_text)
         self.text_box=QTextEdit(); self.text_box.setFixedHeight(75)
         self.text_box.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
+        self._text_change_in_progress = False
 
         self.skip_in_progress = False
         self.new_annotation_pending = False
+        self.is_editing_annotation_mode = False
         self.text_scroll_timer = QTimer()
         self.text_scroll_timer.timeout.connect(self.scroll_annotation_text)
         self.text_scroll_pos = 0
@@ -665,17 +667,27 @@ class PVAnnotator(QWidget):
         self.video_player.setAudioOutput(self.audio_output)
         self.video_player.setVideoOutput(self.video_widget)
         self.video_slider=TimestampSlider()
-        self.video_slider.sliderMoved.connect(lambda pos: self.video_player.setPosition(pos))
+        self.slider_style_default = """
+            QSlider::groove:horizontal { background: #2a82da; height: 6px; border-radius: 3px; }
+            QSlider::handle:horizontal { background: #2a82da; border: 1px solid #1c5fa5; width: 14px; margin: -4px 0; border-radius: 3px; }
+        """
+        self.slider_style_editing = """
+            QSlider::groove:horizontal { background: #d9534f; height: 6px; border-radius: 3px; }
+            QSlider::handle:horizontal { background: #d9534f; border: 1px solid #c9302c; width: 14px; margin: -4px 0; border-radius: 3px; }
+        """
+        self.video_slider.setStyleSheet(self.slider_style_default)
+        self.video_slider.sliderMoved.connect(lambda pos: (self.video_player.setPosition(pos), self.update_editing_annotation_timestamp(pos)))
+        self.video_slider.sliderReleased.connect(lambda: self.update_editing_annotation_timestamp())
         self.video_player.positionChanged.connect(lambda pos: self.update_video_annotation(pos))
         self.video_player.positionChanged.connect(lambda pos: self.video_slider.setValue(pos))
         self.video_player.durationChanged.connect(lambda d: self.video_slider.setMaximum(d))
 
-        self.play_btn=QPushButton("Play/Pause"); self.play_btn.clicked.connect(self.toggle_play)
-        self.replay_btn=QPushButton("Replay"); self.replay_btn.clicked.connect(self.replay_video)
-        self.add_ann_btn=QPushButton("Add annotation"); self.add_ann_btn.clicked.connect(self.add_annotation)
-        self.edit_ann_btn=QPushButton("Edit annotation"); self.edit_ann_btn.clicked.connect(self.edit_annotation)
-        self.remove_ann_btn=QPushButton("Remove annotation"); self.remove_ann_btn.clicked.connect(self.remove_annotation)
-        self.skip_ann_btn=QPushButton("Skip until next annotation"); self.skip_ann_btn.clicked.connect(self.skip_until_next_annotation)
+        self.play_btn=QPushButton("Play/Pause"); self.play_btn.clicked.connect(lambda: self.handle_button_click(self.toggle_play))
+        self.replay_btn=QPushButton("Replay"); self.replay_btn.clicked.connect(lambda: self.handle_button_click(self.replay_video))
+        self.add_ann_btn=QPushButton("Add annotation"); self.add_ann_btn.clicked.connect(lambda: self.handle_button_click(self.add_annotation))
+        self.edit_ann_btn=QPushButton("Edit annotation"); self.edit_ann_btn.clicked.connect(self.toggle_edit_mode)
+        self.remove_ann_btn=QPushButton("Remove annotation"); self.remove_ann_btn.clicked.connect(lambda: self.handle_button_click(self.remove_annotation))
+        self.skip_ann_btn=QPushButton("Skip until next annotation"); self.skip_ann_btn.clicked.connect(lambda: self.handle_button_click(self.skip_until_next_annotation))
         # Make video button fonts bold
         for btn in [self.play_btn, self.replay_btn, self.add_ann_btn, self.edit_ann_btn, self.remove_ann_btn, self.skip_ann_btn]:
             btn.setFont(bold_font)
@@ -704,17 +716,25 @@ class PVAnnotator(QWidget):
         layout.addLayout(meta_layout)
         layout.addWidget(self.text_box)
 
+        # Live-update the active annotation while typing
+        self.text_box.textChanged.connect(self.update_active_annotation_text)
+
         # Override focus out to commit annotation
         orig_focus_out = self.text_box.focusOutEvent
         def text_focus_out(event):
             # Only call update_text() if not creating a new annotation
             # (new annotations are saved by save_pending_annotation instead)
-            if not self.new_annotation_pending:
+            # Also avoid writing to the baseline 0.0 annotation while editing another
+            # annotation; commit_editing_annotation handles that case instead.
+            if not self.new_annotation_pending and not self.is_editing_annotation_mode:
                 self.update_text()
-            self.commit_editing_annotation()       # commit edit if editing
+            # Do not auto-commit edit mode on focus loss; finish_edit_mode handles it
             self.save_pending_annotation()         # commit new annotation if pending
             orig_focus_out(event)
         self.text_box.focusOutEvent = text_focus_out
+
+        # Show placeholder image (app icon) until a folder is chosen
+        self.show_placeholder_image()
 
         self.load_directory(start_path)
 
@@ -751,8 +771,15 @@ class PVAnnotator(QWidget):
             self.index=self.media.index(start_path)
         # Sort video annotations
         for entry in self.data.values():
-            if "annotations" in entry:
-                entry["annotations"]=sorted(entry["annotations"],key=lambda a: a["time"])
+            if "annotations" in entry and isinstance(entry["annotations"], list):
+                entry["annotations"] = sorted(entry["annotations"], key=lambda a: a["time"])
+
+        # Ensure every video has a baseline 0.0 annotation for the "no annotation yet" state
+        for media_path in self.media:
+            if media_path.suffix.lower() in SUPPORTED_VIDEOS:
+                annotations = self.data.setdefault(media_path.name, {}).setdefault("annotations", [])
+                if self.ensure_zero_annotation(annotations):
+                    pass  # save happens later in show_item
         # Update image time display
         image_time = self.get_image_time()
         time_text = "second" if image_time == 1 else "seconds"
@@ -995,9 +1022,9 @@ class PVAnnotator(QWidget):
         if p.suffix.lower() in SUPPORTED_IMAGES:
             self.text_box.setText(entry.get("text",""))
         else:
-            annotations=entry.setdefault("annotations",[])
-            ann0=next((a for a in annotations if a["time"]==0.0),None)
-            self.text_box.setText(ann0["text"] if ann0 else "")
+            annotations = self.get_current_video_annotations()
+            ann0 = next((a for a in annotations if a.get("time") == 0.0), None)
+            self.text_box.setText(ann0.get("text", "") if ann0 else "")
 
         self.setFocus()
         # Media display
@@ -1032,10 +1059,40 @@ class PVAnnotator(QWidget):
         self.next_btn.setText("Next")
         self.save()
 
+    def show_placeholder_image(self):
+        """Display the app icon in the media area before any folder is opened."""
+        icon_path = Path(__file__).parent / "app_icon.png"
+        self.video_widget.hide(); self.video_slider.hide()
+        # Keep the controls visible, just show the placeholder image
+        self.image_label.show()
+        if icon_path.exists():
+            pix = QPixmap(str(icon_path))
+            self.image_label.setPixmap(pix.scaled(800, 600, Qt.KeepAspectRatio))
+        else:
+            self.image_label.setText("Select a folder to begin")
+
     # ---------------- Video Annotation ----------------
+    def ensure_zero_annotation(self, annotations):
+        """Guarantee a time 0.0 annotation exists so the pre-first-annotation area stays blank."""
+        zero_ann = next((a for a in annotations if a.get("time") == 0.0), None)
+        added = False
+        if zero_ann is None:
+            annotations.append({"time": 0.0, "text": ""})
+            added = True
+        else:
+            if "text" not in zero_ann:
+                zero_ann["text"] = ""
+                added = True
+        if added:
+            annotations.sort(key=lambda a: a["time"])
+        return added
+
     def get_current_video_annotations(self):
-        p=self.current()
-        return self.data.setdefault(p.name,{}).setdefault("annotations",[])
+        p = self.current()
+        annotations = self.data.setdefault(p.name, {}).setdefault("annotations", [])
+        if self.ensure_zero_annotation(annotations):
+            self.save()
+        return annotations
 
     def update_video_annotation(self, pos):
 
@@ -1052,6 +1109,9 @@ class PVAnnotator(QWidget):
         pos_sec = pos / 1000.0
         annotations = self.get_current_video_annotations()
         if not annotations:
+            self.text_box.blockSignals(True)
+            self.text_box.setText("")
+            self.text_box.blockSignals(False)
             return
 
         annotations.sort(key=lambda a: a["time"])
@@ -1064,6 +1124,9 @@ class PVAnnotator(QWidget):
                 break
 
         if not active_ann:
+            self.text_box.blockSignals(True)
+            self.text_box.setText("")
+            self.text_box.blockSignals(False)
             return
 
         i, ann = active_ann
@@ -1107,7 +1170,9 @@ class PVAnnotator(QWidget):
         if p.suffix.lower() not in SUPPORTED_VIDEOS:
             return
 
-        pos_sec = self.video_player.position() / 1000.0
+        # Use the slider's position (immediately reflects user drag) instead of the player
+        # position, which can lag until the media seek completes.
+        pos_sec = self.video_slider.value() / 1000.0
         annotations = self.get_current_video_annotations()
 
         # Prevent duplicate skip at same timestamp
@@ -1178,32 +1243,143 @@ class PVAnnotator(QWidget):
         self.save_pending_annotation()
         self.commit_editing_annotation()  # Commit any currently editing annotation
 
-        pos_sec = self.video_player.position() / 1000.0
+        # Use the slider's value, which reflects the exact position the user sees.
+        pos_sec = self.video_slider.value() / 1000.0
         annotations = self.get_current_video_annotations()  # get real list
         annotations.sort(key=lambda a: a["time"])           # sort in-place
 
-        # Find the annotation immediately before current video position
-        times = [a["time"] for a in annotations]
-        idx = bisect_right(times, pos_sec) - 1
-        if 0 <= idx < len(annotations):
-            # Use the real annotation object, not a copy
-            self.editing_annotation = annotations[idx]
-            self.text_box.setText(self.editing_annotation.get("text", ""))
-            self.text_box.setFocus()
-            cursor = self.text_box.textCursor()
-            cursor.movePosition(cursor.End)
-            self.text_box.setTextCursor(cursor)
+        # Pick the active annotation: the last one whose start time is <= position.
+        idx = None
+        for i, ann in enumerate(annotations):
+            if ann["time"] <= pos_sec + 1e-6:  # tolerate tiny float drift
+                idx = i
+            else:
+                break
+        if idx is None:
+            idx = 0
+        self.editing_annotation = annotations[idx]
+        self.editing_annotation_idx = idx
+        self.text_box.setText(self.editing_annotation.get("text", ""))
+        self.text_box.setFocus()
+        cursor = self.text_box.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.text_box.setTextCursor(cursor)
+        self.text_box.moveCursor(QTextCursor.End)
+        self.text_box.ensureCursorVisible()
+        self.set_slider_edit_mode(True)
+        self.is_editing_annotation_mode = True
+        self.edit_ann_btn.setText("Done editing")
 
     def commit_editing_annotation(self):
         if hasattr(self, "editing_annotation"):
             self.editing_annotation["text"] = self.text_box.toPlainText()
             self.save()
+            # Keep index in sync only while editing; remove both markers together
+            if hasattr(self, "editing_annotation_idx"):
+                del self.editing_annotation_idx
             del self.editing_annotation
+            self.set_slider_edit_mode(False)
+
+    def update_editing_annotation_timestamp(self, pos_ms=None):
+        """When editing, move the annotation start time to the slider (or player) position."""
+        if not hasattr(self, "editing_annotation"):
+            return
+
+        p = self.current()
+        if p.suffix.lower() not in SUPPORTED_VIDEOS:
+            return
+
+        # Prefer the slider value we were given; fall back to the player's position
+        if pos_ms is None:
+            pos_ms = self.video_player.position()
+
+        pos_sec = pos_ms / 1000.0
+
+        annotations = self.get_current_video_annotations()
+        self.editing_annotation["time"] = pos_sec
+        annotations.sort(key=lambda a: a["time"])
+        self.save()
+
+    def finish_edit_mode(self):
+        """End editing: capture time/text, reset visuals."""
+        if not self.is_editing_annotation_mode:
+            return
+
+        # Ensure latest slider position is written
+        self.update_editing_annotation_timestamp()
+        # Commit text
+        self.commit_editing_annotation()
+        # Reset visuals/state
+        self.set_slider_edit_mode(False)
+
+    def handle_button_click(self, func):
+        """Finish editing (if active) before running a button action."""
+        self.finish_edit_mode()
+        func()
+
+    def toggle_edit_mode(self):
+        """Toggle between entering edit mode and finishing it."""
+        if self.is_editing_annotation_mode:
+            self.finish_edit_mode()
+        else:
+            self.edit_annotation()
+
+    def set_slider_edit_mode(self, editing: bool):
+        """Visually indicate edit mode on the slider."""
+        self.video_slider.setStyleSheet(self.slider_style_editing if editing else self.slider_style_default)
+        self.video_slider.update()
+        self.is_editing_annotation_mode = editing
+        self.edit_ann_btn.setText("Done editing" if editing else "Edit annotation")
+
+    def _find_active_annotation(self):
+        """Return the active annotation object based on the current slider position."""
+        annotations = self.get_current_video_annotations()
+        pos_sec = self.video_slider.value() / 1000.0
+        active = None
+        for ann in annotations:
+            if ann.get("time", 0.0) <= pos_sec + 1e-6:
+                active = ann
+            else:
+                break
+        return active or annotations[0]
+
+    def update_active_annotation_text(self):
+        """While typing, pause video and write text into the active annotation."""
+        if self._text_change_in_progress:
+            return
+        self._text_change_in_progress = True
+
+        try:
+            p = self.current()
+            # Pause video while typing
+            if p.suffix.lower() in SUPPORTED_VIDEOS and self.video_player.playbackState() == QMediaPlayer.PlayingState:
+                self.video_player.pause()
+
+            # When creating a new annotation, let save_pending_annotation handle persistence
+            if self.new_annotation_pending:
+                return
+
+            if p.suffix.lower() in SUPPORTED_IMAGES:
+                self.data.setdefault(p.name, {})["text"] = self.text_box.toPlainText()
+            else:
+                # If we're editing a specific annotation, keep using that; otherwise pick active
+                if hasattr(self, "editing_annotation"):
+                    target = self.editing_annotation
+                else:
+                    target = self._find_active_annotation()
+
+                target["text"] = self.text_box.toPlainText()
+
+            self.save()
+        finally:
+            self._text_change_in_progress = False
 
     # ---------------- Text Box Focus ----------------
     def text_focus_out(self, event):
         """Commit any new or edited annotation when text box loses focus."""
-        self.commit_editing_annotation()
+        # Keep edit mode active when focus leaves the text box; only finish via buttons.
+        if not self.is_editing_annotation_mode:
+            self.commit_editing_annotation()
         self.save_pending_annotation()
         QTextEdit.focusOutEvent(self.text_box, event)
 
@@ -1241,6 +1417,17 @@ class PVAnnotator(QWidget):
         if active_idx is None:
             return
 
+        active_ann = annotations[active_idx]
+
+        # Never remove the baseline 0.0 annotation; just clear its text
+        if active_ann.get("time") == 0.0:
+            active_ann["text"] = ""
+            self.text_box.blockSignals(True)
+            self.text_box.setText("")
+            self.text_box.blockSignals(False)
+            self.save()
+            return
+
         # Remove it
         annotations.pop(active_idx)
 
@@ -1263,10 +1450,18 @@ class PVAnnotator(QWidget):
         if p.suffix.lower() in SUPPORTED_IMAGES:
             self.data.setdefault(p.name,{})["text"]=self.text_box.toPlainText()
         else:
+            # For videos, write to the active annotation instead of forcing 0.0
             annotations=self.get_current_video_annotations()
-            ann0=next((a for a in annotations if a["time"]==0.0),None)
-            if ann0: ann0["text"]=self.text_box.toPlainText()
-            else: annotations.append({"time":0.0,"text":self.text_box.toPlainText()})
+            pos_sec = self.video_slider.value() / 1000.0
+            active = None
+            for ann in annotations:
+                if ann.get("time",0.0) <= pos_sec + 1e-6:
+                    active = ann
+                else:
+                    break
+            if active is None:
+                active = annotations[0]
+            active["text"] = self.text_box.toPlainText()
         self.save()
 
     def update_location_text(self,text):
