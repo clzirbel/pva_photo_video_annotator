@@ -544,7 +544,10 @@ def load_image(path, rotation):
 
 
 def get_video_duration_ms(video_path):
-    """Get video duration in milliseconds using tinytag. Returns duration or None."""
+    """Get video duration in milliseconds using multiple methods for robustness.
+    Tries TinyTag first, then falls back to MediaInfo if available.
+    Returns duration in milliseconds or None.
+    """
     try:
         tag = TinyTag.get(str(video_path), tags=False, duration=True)
         if tag and tag.duration:
@@ -552,6 +555,18 @@ def get_video_duration_ms(video_path):
             return duration_ms
     except Exception:
         pass
+
+    if MEDIAINFO_AVAILABLE:
+        try:
+            mi = MediaInfo.parse(str(video_path))
+            if mi and mi.tracks:
+                for track in mi.tracks:
+                    if track.track_type == "Video":
+                        if hasattr(track, 'duration') and track.duration:
+                            return int(track.duration)
+        except Exception:
+            pass
+
     return None
 
 def format_time_ms(ms):
@@ -748,7 +763,7 @@ class PVAnnotator(QWidget):
             d=QFileDialog.getExistingDirectory(self,"Select media directory")
             if not d: sys.exit()
             self.dir=Path(d)
-        self.trash=self.dir/TRASH_DIR; self.trash.mkdir(exist_ok=True)
+        self.trash=self.dir/TRASH_DIR
         self.json_path=self.dir/JSON_NAME
         if self.json_path.exists():
             self.data=json.loads(self.json_path.read_text())
@@ -817,13 +832,15 @@ class PVAnnotator(QWidget):
         filename = file_path.name
         entry = self.data.setdefault(filename, {})
 
-        # Check for manually set creation time first (takes precedence)
         if "creation_time_manual" in entry:
-            manual_ts = parse_creation_value(entry["creation_time_manual"])
-            if manual_ts is not None:
-                return manual_ts
+            manual_value = entry["creation_time_manual"]
+            if isinstance(manual_value, str):
+                ts = parse_creation_value(manual_value)
+                if ts is not None:
+                    return ts
+            if isinstance(manual_value, (int, float)):
+                return float(manual_value)
 
-        # Use cached creation_time if available
         if "creation_time" in entry and entry["creation_time"] is not None:
             cached_ts = parse_creation_value(entry["creation_time"])
             if cached_ts is not None:
@@ -982,12 +999,15 @@ class PVAnnotator(QWidget):
         self.extract_and_store_location(p)
 
         # Use cached creation time for display
-        # Get the stored display string from JSON instead of reformatting the epoch
         filename = p.name
         entry = self.data.get(filename, {})
-        ts = entry.get("creation_time")
+        ts = None
 
-        # If not in JSON, calculate it
+        if "creation_time_manual" in entry:
+            ts = entry["creation_time_manual"]
+        elif "creation_time" in entry:
+            ts = entry["creation_time"]
+
         if not ts:
             creation_time = self.get_cached_creation_time(p)
             ts = format_creation_timestamp(creation_time)
@@ -1515,15 +1535,13 @@ class PVAnnotator(QWidget):
         self.save()
 
     def update_creation_time(self):
-        """Parse and validate the user-edited creation time."""
+        """Parse and validate the user-edited creation time, immediately update display and resort."""
         p = self.current()
         text = self.datetime_box.text().strip()
 
-        # Validate the format
         timestamp = self.validate_datetime(text)
         if timestamp is None:
             QMessageBox.warning(self, "Invalid Format", "Please use YYYY/MM/DD HH:MM:SS (e.g., 2024/12/31 14:30:00)")
-            # Reset to current value
             creation_time = self.get_cached_creation_time(p)
             ts = format_creation_timestamp(creation_time)
             self.datetime_box.blockSignals(True)
@@ -1531,16 +1549,17 @@ class PVAnnotator(QWidget):
             self.datetime_box.blockSignals(False)
             return
 
-        # Save the manual creation time - store the text directly without reformatting
-        # This preserves what the user entered
         entry = self.data.setdefault(p.name, {})
         entry["creation_time_manual"] = text
         self.save()
 
-        # Re-sort media list with new time
+        self.datetime_box.blockSignals(True)
+        self.datetime_box.setText(text)
+        self.datetime_box.blockSignals(False)
+
         self.media = sorted(self.media, key=lambda path: self.get_cached_creation_time(path))
         self.index = self.media.index(p) if p in self.media else 0
-        self.show_item()
+        self.update_position_display()
 
     def update_image_time(self):
         """Parse image time input and save to settings."""
@@ -1673,14 +1692,15 @@ class PVAnnotator(QWidget):
 
     def trash_item(self):
         p=self.current()
-        # Create set_aside folder in the same directory as the file
         file_parent = p.parent
         trash_dir = file_parent / TRASH_DIR
         trash_dir.mkdir(exist_ok=True)
         shutil.move(str(p), trash_dir / p.name)
         self.media.remove(p)
+        self.index = min(self.index, len(self.media) - 1) if self.media else 0
         self.save()
-        self.show_item()
+        if self.media:
+            self.show_item()
 
     def toggle_slideshow(self):
         self.slideshow=not self.slideshow
