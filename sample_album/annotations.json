@@ -1,7 +1,7 @@
 {
   "_settings": {
     "font_size": 14,
-    "image_time": 5.0
+    "image_time": 2.0
   },
   "PXL_20251015_220836835.jpg": {
     "rotation": 90,
@@ -180,6 +180,13 @@
   },
   "image_from_paint_with_very_very_very_very_super_crazy_long_filename_that_does_not_wrap.gif": {
     "location": {},
-    "creation_time": "2025/12/31 09:27:38"
+    "creation_time": "2025/12/31 09:27:38",
+    "text": ""
+  },
+  "introduction_image.gif": {
+    "creation_time": "2026/01/03 13:07:12",
+    "location": {},
+    "text": "",
+    "creation_time_manual": "2022/01/03 13:07:12"
   }
 }
