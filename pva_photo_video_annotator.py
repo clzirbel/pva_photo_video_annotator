@@ -706,7 +706,7 @@ class PVAnnotator(QWidget):
         self.add_ann_btn=QPushButton("Add annotation"); self.add_ann_btn.clicked.connect(lambda: self.handle_button_click(self.add_annotation))
         self.edit_ann_btn=QPushButton("Edit annotation"); self.edit_ann_btn.clicked.connect(self.toggle_edit_mode)
         self.remove_ann_btn=QPushButton("Remove annotation"); self.remove_ann_btn.clicked.connect(lambda: self.handle_button_click(self.remove_annotation))
-        self.skip_ann_btn=QPushButton("Skip until next annotation"); self.skip_ann_btn.clicked.connect(lambda: self.handle_button_click(self.skip_until_next_annotation))
+        self.skip_ann_btn=QPushButton("Skip segment"); self.skip_ann_btn.clicked.connect(lambda: self.handle_button_click(self.skip_until_next_annotation))
         # Make video button fonts bold
         for btn in [self.play_btn, self.replay_btn, self.add_ann_btn, self.edit_ann_btn, self.remove_ann_btn, self.skip_ann_btn]:
             btn.setFont(bold_font)
@@ -723,8 +723,8 @@ class PVAnnotator(QWidget):
         layout.addWidget(self.video_slider)
         video_btn_layout=QHBoxLayout()
         video_btn_layout.setSpacing(2)
-        for b in [self.play_btn,self.replay_btn,self.add_ann_btn,self.edit_ann_btn,
-                  self.remove_ann_btn,self.skip_ann_btn]: video_btn_layout.addWidget(b)
+        for b in [self.play_btn,self.add_ann_btn,self.edit_ann_btn,
+                  self.remove_ann_btn,self.skip_ann_btn,self.replay_btn]: video_btn_layout.addWidget(b)
         layout.addLayout(video_btn_layout)
         button_layout=QHBoxLayout()
         button_layout.setSpacing(2)
@@ -1239,6 +1239,7 @@ class PVAnnotator(QWidget):
 
 
     def skip_until_next_annotation(self):
+        self.stop_slideshow_if_running()
         p = self.current()
         if p.suffix.lower() not in SUPPORTED_VIDEOS:
             return
@@ -1292,6 +1293,7 @@ class PVAnnotator(QWidget):
             delattr(self, "new_annotation_timestamp")
 
     def add_annotation(self):
+        self.stop_slideshow_if_running()
         p = self.current()
         if p.suffix.lower() not in SUPPORTED_VIDEOS:
             return
@@ -1306,6 +1308,7 @@ class PVAnnotator(QWidget):
         self.text_box.setTextCursor(cursor)
 
     def edit_annotation(self):
+        self.stop_slideshow_if_running()
         p = self.current()
         if p.suffix.lower() not in SUPPORTED_VIDEOS:
             return
@@ -1390,6 +1393,7 @@ class PVAnnotator(QWidget):
 
     def toggle_edit_mode(self):
         """Toggle between entering edit mode and finishing it."""
+        self.stop_slideshow_if_running()
         if self.is_editing_annotation_mode:
             self.finish_edit_mode()
         else:
@@ -1463,6 +1467,7 @@ class PVAnnotator(QWidget):
 
 
     def remove_annotation(self):
+        self.stop_slideshow_if_running()
         p = self.current()
         if p.suffix.lower() not in SUPPORTED_VIDEOS:
             return
@@ -1708,6 +1713,68 @@ class PVAnnotator(QWidget):
         if self.media:
             self.show_item()
 
+    def stop_slideshow_if_running(self):
+        """Stop slideshow if it's currently running and reset button text."""
+        if self.slideshow:
+            self.slideshow = False
+            self.slide_btn.setText("Slideshow")
+            self.timer.stop()
+            self.text_scroll_timer.stop()
+
+    def get_effective_video_duration_ms(self, video_path):
+        """Get the effective duration of a video considering skipped segments.
+        Returns the end time of the last non-skipped segment in milliseconds.
+        If all segments are skipped or the last segment is skipped, returns the appropriate end time."""
+        annotations = self.data.get(video_path.name, {}).get("annotations", [])
+        if not annotations:
+            return get_video_duration_ms(video_path)
+
+        # Sort annotations by time
+        annotations = sorted(annotations, key=lambda a: a["time"])
+
+        # Find the last non-skipped segment
+        last_non_skipped_time = 0.0
+        for i, ann in enumerate(annotations):
+            if not ann.get("skip", False):
+                last_non_skipped_time = ann["time"]
+                # Check if there's a next annotation (which marks the end of this segment)
+                if i + 1 < len(annotations):
+                    segment_end_time = annotations[i + 1]["time"]
+                else:
+                    # This is the last annotation, use full video duration from this point
+                    full_duration_ms = get_video_duration_ms(video_path)
+                    if full_duration_ms:
+                        return full_duration_ms
+                    else:
+                        return int(ann["time"] * 1000)
+
+        # If we get here, return the time we should wait until
+        # If last_non_skipped_time is still 0, all segments are skipped, so return immediately
+        if last_non_skipped_time == 0.0 and annotations and annotations[0].get("skip", False):
+            # All segments are skipped, return the time of the first annotation
+            return int(annotations[0]["time"] * 1000) if annotations[0]["time"] > 0 else 100
+
+        # Check if the last annotation is non-skipped and get when its content ends
+        last_ann = annotations[-1]
+        if not last_ann.get("skip", False):
+            # Last annotation is not skipped
+            full_duration_ms = get_video_duration_ms(video_path)
+            if full_duration_ms:
+                return full_duration_ms
+            else:
+                return int(last_ann["time"] * 1000)
+
+        # Last annotation is skipped, return when it starts
+        return int(last_ann["time"] * 1000)
+
+    def stop_slideshow_if_running(self):
+        """Stop slideshow if it's currently running and reset button text."""
+        if self.slideshow:
+            self.slideshow = False
+            self.slide_btn.setText("Slideshow")
+            self.timer.stop()
+            self.text_scroll_timer.stop()
+
     def toggle_slideshow(self):
         self.slideshow=not self.slideshow
         self.text_scroll_timer.stop()
@@ -1717,12 +1784,12 @@ class PVAnnotator(QWidget):
             image_time = self.get_image_time()
             image_time_ms = int(image_time * 1000)
             if p.suffix.lower() in SUPPORTED_VIDEOS:
-                # For videos, get duration and set timer to that
+                # For videos, get effective duration considering skipped segments
                 # But if image_time <= 1 second, use image_time to allow fast navigation
                 if image_time <= 1:
                     self.timer.start(image_time_ms)
                 else:
-                    dur_ms = get_video_duration_ms(p)
+                    dur_ms = self.get_effective_video_duration_ms(p)
                     if dur_ms and dur_ms > 0:
                         self.timer.start(dur_ms)
                     else:
@@ -1759,12 +1826,12 @@ class PVAnnotator(QWidget):
                 # Fast navigation mode: fixed delay time, no text scrolling
                 self.timer.start(image_time_ms)
         else:
-            # For videos, get duration and set timer to that
+            # For videos, get effective duration considering skipped segments
             # But if image_time <= 1 second, use image_time to allow fast navigation
             if image_time <= 1:
                 self.timer.start(image_time_ms)
             else:
-                dur_ms = get_video_duration_ms(p)
+                dur_ms = self.get_effective_video_duration_ms(p)
                 if dur_ms and dur_ms > 0:
                     self.timer.start(dur_ms)
                 else:
@@ -1805,11 +1872,13 @@ class PVAnnotator(QWidget):
 
     # ---------------- Video Controls ----------------
     def toggle_play(self):
+        self.stop_slideshow_if_running()
         if self.video_player.playbackState()==QMediaPlayer.PlayingState: self.video_player.pause()
         else: self.video_player.play()
 
     def replay_video(self):
         """Completely reset video and replay from start."""
+        self.stop_slideshow_if_running()
         p = self.current()
         if p.suffix.lower() in SUPPORTED_VIDEOS:
             # Full reset: stop, clear source completely, then reload to clear decoder state
