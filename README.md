@@ -4,7 +4,7 @@ PVA is a simple yet powerful tool for viewing, organizing, and annotating photos
 
 ## Demonstration video
 
-[4-minute video demonstration](https://bgsu.instructuremedia.com/embed/68ebf54f-985d-4450-8f6e-eb938aced467)
+[4-minute video demonstration](PVA_demonstration.mp4)
 
 ## Features
 
