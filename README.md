@@ -2,6 +2,10 @@
 
 PVA is a simple yet powerful tool for viewing, organizing, and annotating photos and videos. The PVA Photo and Video Annotator lets you click through media files in a folder, add detailed annotations to images and videos, skip unwanted segments of videos, and view the results as a slideshow. Your media files are not altered, and the text annotations you add are stored in an efficient format.
 
+## Demonstration video
+
+[4-minute video demonstration](https://bgsu.instructuremedia.com/embed/68ebf54f-985d-4450-8f6e-eb938aced467)
+
 ## Features
 
 - **Browse Media**: View photos and videos from any folder (including subfolders) with a clean, intuitive interface
@@ -17,18 +21,20 @@ PVA is a simple yet powerful tool for viewing, organizing, and annotating photos
 
 ## Getting Started
 
-### Quick Start: Windows Executable (Recommended)
+### Quick Start: Download executable file
 
-The easiest way to get started on Windows is to download the pre-built Windows executable:
+The easiest way to get started is to download the pre-built executable file for Windows, Mac, or Linux.
 
 1. Go to the [Releases](https://github.com/clzirbel/pva_photo_video_annotator/releases) page, find the most recent release, and view its Assets
-2. Download the `PVA Photo and Video Annotator.exe` file and store in Documents or C:\
-3. Run `PVA Photo and Video Annotator.exe` file by double clicking it
-4. If Windows objects, click More Info and then Run Anyway
-5. Select a folder with your photos and videos to begin annotating
+2. Download the `PVA Photo and Video Annotator` file appropriate for your operating system and store in a place you can find it easily
+3. Run the executable file in the normal way on your OS
+4. Select a folder with your photos and videos to begin annotating
 
-The executable runs on any Windows machine without requiring Python or any additional setup.  After you run it once, you can alternatively right click an image or video file in a folder, Open With, Browse for additional programs, and select PVA_Photo_and_Video_Annotator.exe.
+Windows-specific notes.
+- If Windows objects that the program is not safe, click More Info and then Run Anyway
+- On windows, you can right click an image file in the folder, Open with ..., Browse for additional programs, and select PVA_Photo_and_Video_Annotator_Windows.exe
 
+The executable runs without requiring Python or any additional setup.
 If you prefer to run the application as a Python project (for development or customization), follow the steps at the end of this file.
 
 ### Folder organization ###
