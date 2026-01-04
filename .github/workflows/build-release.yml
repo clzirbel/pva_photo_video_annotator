@@ -63,6 +63,11 @@ jobs:
             --name PVA_Photo_and_Video_Annotator_Mac \
             pva_photo_video_annotator.py
 
+      - name: Copy Mac helper script
+        if: runner.os == 'macOS'
+        run: |
+          cp run_PVA_Mac.command dist/
+
       - name: Build executable (Linux)
         if: runner.os == 'Linux'
         run: |

@@ -26,13 +26,22 @@ PVA is a simple yet powerful tool for viewing, organizing, and annotating photos
 The easiest way to get started is to download the pre-built executable file for Windows, Mac, or Linux.
 
 1. Go to the [Releases](https://github.com/clzirbel/pva_photo_video_annotator/releases) page, find the most recent release, and view its Assets
-2. Download the `PVA Photo and Video Annotator` file appropriate for your operating system and store in a place you can find it easily
+2. Download the file appropriate for your operating system:
+   - **Windows**: Download `PVA_Photo_and_Video_Annotator_Windows`
+   - **Mac**: Download BOTH `PVA_Photo_and_Video_Annotator_Mac` AND `run_PVA_Mac.command` (see Mac instructions below)
+   - **Linux**: Download `PVA_Photo_and_Video_Annotator_Linux`
 3. Run the executable file in the normal way on your OS
 4. Select a folder with your photos and videos to begin annotating
 
-Windows-specific notes.
+**Windows-specific notes:**
 - If Windows objects that the program is not safe, click More Info and then Run Anyway
-- On windows, you can right click an image file in the folder, Open with ..., Browse for additional programs, and select PVA_Photo_and_Video_Annotator_Windows.exe
+- On Windows, you can right-click an image file in a folder, select "Open with...", browse for additional programs, and select the PVA executable
+
+**Mac-specific notes:**
+1. After downloading both files from the releases page, save them in the same folder
+2. Double-click the `run_PVA_Mac.command` file to set up permissions (you only need to do this once)
+3. The script will automatically prepare the executable and launch it
+4. Next time you want to run PVA, you can double-click the `PVA_Photo_and_Video_Annotator_Mac` executable directly
 
 The executable runs without requiring Python or any additional setup.
 If you prefer to run the application as a Python project (for development or customization), follow the steps at the end of this file.
