@@ -646,8 +646,8 @@ class PVAnnotator(QWidget):
         bold_font.setBold(True)
         for btn in [self.prev_btn, self.skip_btn, self.trash_btn, self.rotate_btn, self.volume_btn, self.slide_btn, self.next_btn]:
             btn.setFont(bold_font)
-            # Fix for Ubuntu: ensure button text is visible
-            if sys.platform.startswith('linux'):
+            # Fix for Linux/Mac: ensure button text is visible
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
                 btn.setStyleSheet("QPushButton { color: black; }")
         for b,f in [(self.prev_btn,self.prev_item),(self.next_btn,self.next_item),
                 (self.skip_btn,self.skip_item),(self.trash_btn,self.trash_item),
@@ -710,8 +710,8 @@ class PVAnnotator(QWidget):
         # Make video button fonts bold
         for btn in [self.play_btn, self.replay_btn, self.add_ann_btn, self.edit_ann_btn, self.remove_ann_btn, self.skip_ann_btn]:
             btn.setFont(bold_font)
-            # Fix for Ubuntu: ensure button text is visible
-            if sys.platform.startswith('linux'):
+            # Fix for Linux/Mac: ensure button text is visible
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
                 btn.setStyleSheet("QPushButton { color: black; }")
 
         # Layout with minimal spacing
