@@ -331,3 +331,12 @@ The application requires the following Python packages:
 - **requests** (≥2.28.0): HTTP library for location reverse-geocoding
 - **tinytag** (≥1.9.0): Audio/video metadata extraction (for video duration)
 - **Pillow** (≥9.0.0): Image processing library
+
+### Credits
+
+- Craig L. Zirbel; design, testing, debugging, images
+- ChatGPT; initial code version, icon
+- Cladue; code revisions
+- GitHub; executable versions
+- ElevenLabs; text to speech for audio in demonstration video
+- Canvas Studio; screen capture for demonstration video
