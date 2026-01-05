@@ -1,0 +1,21 @@
+title: PVA Photo and Video Annotator
+description: Photo and video annotation tool
+theme: minima
+
+plugins:
+  - jekyll-github-metadata
+
+github:
+  is_project_page: true
+
+header_pages:
+  - index.md
+  - download.md
+  - usage.md
+
+author: Craig L. Zirbel
+keywords:
+  - video annotation
+  - photo annotation
+  - research tools
+  - desktop application

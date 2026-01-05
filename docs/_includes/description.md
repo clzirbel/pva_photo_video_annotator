@@ -1,0 +1,1 @@
+The PVA Photo and Video Annotator is a desktop application for organizing and viewing images and videos in a folder, making it easy to click through media files, add detailed annotations to images and videos, skip unwanted segments of videos, and view the results as a slideshow.

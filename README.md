@@ -1,14 +1,14 @@
+![Latest Release](https://img.shields.io/github/v/release/clzirbel/pva_photo_video_annotator)
+![Platforms](https://img.shields.io/badge/platform-Windows%20|%20macOS%20|%20Linux-blue)
+![License](https://img.shields.io/github/license/clzirbel/pva_photo_video_annotator)
+
 # PVA Photo and Video Annotator
 
-PVA is a simple yet powerful tool for viewing, organizing, and annotating photos and videos. The PVA Photo and Video Annotator lets you click through media files in a folder, add detailed annotations to images and videos, skip unwanted segments of videos, and view the results as a slideshow. Your media files are not altered, and the text annotations you add are stored in an efficient format.
-
-## Demonstration video
-
-[4-minute video demonstration](https://bgsu.instructuremedia.com/embed/68ebf54f-985d-4450-8f6e-eb938aced467)
+The PVA Photo and Video Annotator is a desktop application for organizing and viewing images and videos in a folder, making it easy to click through media files, add detailed annotations to images and videos, skip unwanted segments of videos, and view the results as a slideshow.
 
 ## Features
 
-- **Browse Media**: View photos and videos from any folder (including subfolders) with a clean, intuitive interface
+- **Browse Media**: View photos and videos from any folder with a clean, intuitive interface
 - **Subfolder Support**: When opening a folder, you'll be prompted for each subfolder to choose to include or exclude the files from each one
 - **Organize Media**: Quickly hide unwanted files or move them to a "Set Aside" folder
 - **Image Annotations**: Add text descriptions to photos
@@ -18,30 +18,17 @@ PVA is a simple yet powerful tool for viewing, organizing, and annotating photos
 - **Volume Control**: Adjust video volume on a per-file basis
 - **Image Rotation**: Rotate photos that have incorrect orientation
 - **Persistent Storage**: All annotations and metadata are saved to a text file in JSON format, using minimal disk space
+- **Your files**:  Your media files are not altered or deleted.
 
-## Getting Started
+## Walkthrough video
 
-### Quick Start: Download executable file
+[4-minute video walkthrough](https://bgsu.instructuremedia.com/embed/68ebf54f-985d-4450-8f6e-eb938aced467)
 
-The easiest way to get started is to download the pre-built executable file for Windows, Mac, or Linux.
+## Executable files
 
-1. Go to the [Releases](https://github.com/clzirbel/pva_photo_video_annotator/releases) page, find the most recent release, and view its Assets
-2. Download the file appropriate for your operating system:
-   - **Windows**: Download `PVA_Photo_and_Video_Annotator_Windows`
-   - **Mac**: Download BOTH `PVA_Photo_and_Video_Annotator_Mac` AND `run_PVA_Mac.command` (see Mac instructions below)
-   - **Linux**: Download `PVA_Photo_and_Video_Annotator_Linux`
-3. Run the executable file in the normal way on your OS
-4. Select a folder with your photos and videos to begin annotating
+For Windows, macOS, and Linux executables, see:
 
-**Windows-specific notes:**
-- If Windows objects that the program is not safe, click More Info and then Run Anyway
-- On Windows, you can right-click an image file in a folder, select "Open with...", browse for additional programs, and select the PVA executable
-
-**Mac-specific notes:**
-1. After downloading both files from the releases page, save them in the same folder
-2. Double-click the `run_PVA_Mac.command` file to set up permissions (you only need to do this once)
-3. The script will automatically prepare the executable and launch it
-4. Next time you want to run PVA, you can double-click the `PVA_Photo_and_Video_Annotator_Mac` executable directly
+➡ https://clzirbel.github.io/pva_photo_video_annotator/download
 
 The executable runs without requiring Python or any additional setup.
 If you prefer to run the application as a Python project (for development or customization), follow the steps at the end of this file.
