@@ -1007,14 +1007,19 @@ class PVAnnotator(QWidget):
         # Use cached creation time for display
         filename = p.name
         entry = self.data.get(filename, {})
+        # Prefer manual timestamp when present, even if blank; fall back to auto/derived
+        def to_display(raw_value):
+            ts_val = parse_creation_value(raw_value)
+            if ts_val is not None:
+                return format_creation_timestamp(ts_val)
+            return str(raw_value) if raw_value is not None else None
+
         ts = None
-
         if "creation_time_manual" in entry:
-            ts = entry["creation_time_manual"]
-        elif "creation_time" in entry:
-            ts = entry["creation_time"]
-
-        if not ts:
+            ts = to_display(entry.get("creation_time_manual"))
+        if ts is None and "creation_time" in entry:
+            ts = to_display(entry.get("creation_time"))
+        if ts is None:
             creation_time = self.get_cached_creation_time(p)
             ts = format_creation_timestamp(creation_time)
 
