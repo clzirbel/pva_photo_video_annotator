@@ -2,14 +2,13 @@
 layout: default
 ---
 
-<nav>
 [Overview](#overview) |
 [Video](#walkthrough-video) |
 [Features](#features) |
 [Download](#download) |
-[Usage](#usage) |
-[GitHub](https://github.com/clzirbel/pva_photo_video_annotator)
-</nav>
+[Preparation](#preparation) |
+[Navigation](#navigation) |
+[Videos](#videos) |
 
 # Overview <a id="overview"></a>
 
@@ -88,7 +87,7 @@ chmod +x PVA_Photo_and_Video_Annotator_Linux
 
 ---
 
-# Usage <a id="usage"></a>
+# Preparation <a id="preparation"></a>
 
 ## File organization
 
@@ -96,11 +95,16 @@ Your folder of images and videos can have subfolders with additional images and 
 
 When you launch the application, select the folder containing your photos and videos. You'll be prompted to confirm which subfolders to include in your annotation project. The program will read any existing annotations from an `annotations.json` file in that folder, or create one if it doesn't exist.
 
+You can manually remove files from the folder, PVA will not complain that they are gone.
+If you rename a file, PVA will not associate the new name with information stored for the old name.
+
 ## Supported Image and Video Formats
 
 **Images**: JPG, JPEG, PNG, GIF, BMP, TIFF, TIF, WebP
 
 **Videos**: MP4, MOV, AVI, MKV, FLV, WMV, WebM, M4V, 3GP
+
+---
 
 # Navigation
 
@@ -110,21 +114,20 @@ When you launch the application, select the folder containing your photos and vi
             border: 1px solid #333;
             box-sizing: border-box;">
 
-## Next and Previous Buttons
+## Sort Order
 
-Use the **Next** and **Previous** buttons to navigate through your media files one at a time.
-
-- **Next**: Moves to the next media file in the folder. If you're at the last file, it wraps back to the first.
-- **Previous**: Moves to the previous media file. If you're at the first file, it wraps back to the last.
-- **File Display**: The filename is shown with its relative path, so files in subfolders appear as `SubfolderName/filename.jpg`
-- **Sort Order**: Files are sorted by creation date, which is determined intelligently:
+Files are sorted by creation date, which is determined intelligently:
   - For photos: EXIF datetime is used (the actual date the photo was taken)
   - For files without EXIF data: The earliest filesystem timestamp is used (handles Google Photos and other downloaded files correctly)
   - You can manually edit any creation date by clicking on the date field and entering a new date in `YYYY-MM-DD HH:MM:SS` format
   - Manually editing the creation date is useful, for example, if you splice in a downloaded stock image to be part of the slideshow.
   - No other sorting criterion is supported at this time.
 
-When you navigate to a video, it will automatically start playing.
+## Next and Previous Buttons
+
+- **Next**: Moves to the next media file in the folder. If you're at the last file, it wraps back to the first.
+- **Previous**: Moves to the previous media file. If you're at the first file, it wraps back to the last.
+- **Filename Display**: The filename is shown with its relative path, so files in subfolders appear as `SubfolderName/filename.jpg`
 
 ## Skip File
 
@@ -217,12 +220,12 @@ The dropdown shows all unique locations (both manual and automated) across all f
 When you navigate to a video:
 
 1. The video begins playing automatically
-2. The volume is set to whatever you previously selected (or 100% if new)
+2. The volume is set to whatever you previously selected (or 100% if newly displayed)
 3. Use **Play/Pause** to control playback
 4. Use **Replay** to restart from the beginning
 5. Click on the progress slider to jump to a specific time, or hover over it to see timestamps
 
-## Add Video Annotations
+## Add Video Annotation
 
 Videos support more sophisticated annotation: you can add multiple text annotations at different time points, and mark segments to be automatically skipped.
 
@@ -236,7 +239,7 @@ To add a text annotation at a specific time:
 
 You can add as many annotations as you want throughout the video, each with its own timestamp.
 
-## Edit Video Annotations
+## Edit Video Annotation
 
 To edit an existing annotation:
 
@@ -247,15 +250,7 @@ To edit an existing annotation:
 
 The text is updated while the timestamp remains unchanged.
 
-## Removing Video Annotations
-
-To delete an annotation:
-
-1. Pause the video during the time of the annotation you want to remove
-2. Click **Remove annotation**
-3. The annotation is deleted and the video returns to the previous annotation
-
-### Skipping Video Segments
+### Skipping Video Segment
 
 To mark a segment of the video to be automatically skipped during playback:
 
@@ -267,7 +262,15 @@ To mark a segment of the video to be automatically skipped during playback:
 
 This is useful for removing unwanted sections (background noise, false starts, etc.) without deleting the original video file.  You can adjust the slider into a skipped segment to remove the skip annotation, if desired, or to start a new annotation where the video should start playing again.
 
-### Video Volume Control
+## Removing Video Annotation
+
+To delete an annotation:
+
+1. Pause the video during the time of the annotation you want to remove
+2. Click **Remove annotation**
+3. The annotation is deleted and the video returns to the previous annotation
+
+## Video Volume Control
 
 For videos, use the **Volume** button (showing the current volume level) to adjust playback volume:
 
@@ -277,7 +280,7 @@ For videos, use the **Volume** button (showing the current volume level) to adju
 
 Use this to mute videos with too much background noise or to reduce or equalize volume for quieter content.
 
-## Storage and Formats
+# Storage and Formats
 
 All annotations, metadata, and preferences are stored in a JSON file (`annotations.json`) in your media folder. The JSON format makes it easy to:
 
@@ -288,7 +291,7 @@ All annotations, metadata, and preferences are stored in a JSON file (`annotatio
 
 However, be careful with JSON format because the brackets and commas are very important; it is better to avoid editing the JSON file if at all possible.
 
-## Date and Time Handling
+# Date and Time Handling
 
 The application intelligently determines creation dates for your media files:
 
@@ -299,7 +302,9 @@ The application intelligently determines creation dates for your media files:
 
 The goal is that files are always sorted in the order they were taken, regardless of whether they were downloaded, emailed, or copied to your collection.
 
-## JSON File Entries
+# JSON File Entries
+
+The file annotations.json stores the text you type and the location information that PVA extracts and looks up online.
 
 Each media file gets an entry in the JSON with:
 - `text`: Text annotation (images) or time-stamped annotations (videos)
@@ -313,10 +318,9 @@ The application also stores settings in the `_settings` object:
 - `image_time`: Number of seconds each image displays during slideshow (default: 5)
 - `font_size`: Font size for text (default: 14)
 
-## Tips and Tricks
+# Tips and Tricks
 
 - **Keyboard Navigation**: Use the arrow keys (→ and ←) to navigate between files quickly
-- **Bulk Organization**: Use Next/Previous to go through all files, pressing Skip or Set Aside on unwanted ones
 - **Slideshow for Review**: Use Slideshow mode to review or admire your entire collection at once
 - **Location Dropdowns**: The location dropdown shows all previously used locations, making it easy to tag files consistently
 - **Timestamps**: Hover over the video progress bar to see the exact timestamp at any point
