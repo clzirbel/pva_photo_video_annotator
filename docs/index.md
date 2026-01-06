@@ -2,14 +2,6 @@
 layout: default
 ---
 
-[Overview](#overview) |
-[Video](#walkthrough-video) |
-[Features](#features) |
-[Download](#download) |
-[Preparation](#preparation) |
-[Navigation](#navigation) |
-[Videos](#videos) |
-
 <nav>
   <a href="#walkthrough-video">Video</a> |
   <a href="#features">Features</a> |
