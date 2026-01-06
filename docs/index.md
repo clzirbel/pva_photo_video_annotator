@@ -1,6 +1,5 @@
 ---
 layout: default
-title: PVA Photo and Video Annotator
 ---
 
 <nav>
@@ -11,8 +10,6 @@ title: PVA Photo and Video Annotator
 [Usage](#usage) |
 [GitHub](https://github.com/clzirbel/pva_photo_video_annotator)
 </nav>
-
-# {{ site.title }}
 
 # Overview <a id="overview"></a>
 
