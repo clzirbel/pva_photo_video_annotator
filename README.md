@@ -6,16 +6,11 @@
 
 The PVA Photo and Video Annotator is a desktop application for organizing and viewing images and videos in a folder, making it easy to click through media files, add detailed annotations to images and videos, skip unwanted segments of videos, and view the results as a slideshow.
 
-## Video, features, executable downloads, screenshots
+## Project website
 
-[See the GitHub pages for the deployment](https://clzirbel.github.io/pva_photo_video_annotator)
+The [Project website](https://clzirbel.github.io/pva_photo_video_annotator) has a video walkthrough, list of features, executables to download, and usage instructions with screenshots
 
-## Walkthrough video
-
-[4-minute video walkthrough](https://bgsu.instructuremedia.com/embed/68ebf54f-985d-4450-8f6e-eb938aced467)
-
-
-## Run as Python Project
+## Python Code
 
 PVA is written entirely in Python using Python packages.
 
@@ -90,6 +85,8 @@ The application requires the following Python packages:
 - **requests** (≥2.28.0): HTTP library for location reverse-geocoding
 - **tinytag** (≥1.9.0): Audio/video metadata extraction (for video duration)
 - **Pillow** (≥9.0.0): Image processing library
+- **hachoir** (>=3.1.0): Process binary file (to extract video GPS)
+- **pymediainfo** (>=6.1.0): Extract information from media files
 
 ## Credits
 

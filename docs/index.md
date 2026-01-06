@@ -14,22 +14,24 @@ title: PVA Photo and Video Annotator
 
 # {{ site.title }}
 
-## Overview <a id="overview"></a>
+# Overview <a id="overview"></a>
 
 {% include description.md %}
 
 ---
 
-## Walkthrough video <a id="walkthrough-video"></a>
+# Walkthrough video <a id="walkthrough-video"></a>
 
-<video controls width="800">
+<video controls
+       style="max-width: 900px; width: 100%;
+              border: 1px solid #333;
+              box-sizing: border-box;">
   <source src="assets/PVA_walkthrough.mp4" type="video/mp4">
-  Your browser does not support the video tag.
 </video>
 
 ---
 
-## Features <a id="features"></a>
+# Features <a id="features"></a>
 
 - **Browse Media**: View photos and videos from any folder with a clean, intuitive interface
 - **Subfolder Support**: When opening a folder, you'll be prompted for each subfolder to choose to include or exclude the files from each one
@@ -45,17 +47,13 @@ title: PVA Photo and Video Annotator
 
 ---
 
-## Download and Install Executable Files <a id="download"></a>
+# Download and Install Executable Files <a id="download"></a>
 
-➡ **[Download the latest release]({{ site.github.latest_release.html_url }})**
+The easiest way to use PVA is to use the download link below to get the file(s) necessary for your operating system.
 
-➡ **[Go to the latest release]({{ site.github.latest_release.html_url }})**
+**[Go to the latest release]({{ site.github.latest_release.html_url }})**
 
-The easiest way to get started is to download the pre-built executable
-for your operating system.
-Choose your operating system
-
-### Windows
+## Windows
 
 Download:
 - `PVA_Photo_and_Video_Annotator_Windows.exe`
@@ -66,7 +64,7 @@ Notes:
 
 ---
 
-### macOS
+## macOS
 
 Download **both**:
 - `PVA_Photo_and_Video_Annotator_macOS`
@@ -81,7 +79,7 @@ After that, you can launch `PVA_Photo_and_Video_Annotator_macOS` directly
 
 ---
 
-### Linux
+## Linux
 
 Download:
 - `PVA_Photo_and_Video_Annotator_Linux`
@@ -93,23 +91,29 @@ chmod +x PVA_Photo_and_Video_Annotator_Linux
 
 ---
 
-## Usage <a id="usage"></a>
+# Usage <a id="usage"></a>
 
-### Folder organization ###
+## File organization
 
 Your folder of images and videos can have subfolders with additional images and videos; the program will first ask you which sub-folders to consider. Generally, it is good to use the program on a folder with a single coherent theme, rather than on multiple loosely related folders.
 
 When you launch the application, select the folder containing your photos and videos. You'll be prompted to confirm which subfolders to include in your annotation project. The program will read any existing annotations from an `annotations.json` file in that folder, or create one if it doesn't exist.
 
-### Supported Image and Video Formats
+## Supported Image and Video Formats
 
 **Images**: JPG, JPEG, PNG, GIF, BMP, TIFF, TIF, WebP
 
 **Videos**: MP4, MOV, AVI, MKV, FLV, WMV, WebM, M4V, 3GP
 
-### Basic Navigation
+# Navigation
 
-#### Next and Previous Buttons
+<img src="assets/navigation.png"
+     alt="Navigation buttons"
+     style="max-width: 900px; width: 100%;
+            border: 1px solid #333;
+            box-sizing: border-box;">
+
+## Next and Previous Buttons
 
 Use the **Next** and **Previous** buttons to navigate through your media files one at a time.
 
@@ -125,7 +129,28 @@ Use the **Next** and **Previous** buttons to navigate through your media files o
 
 When you navigate to a video, it will automatically start playing.
 
-### Slideshow
+## Skip File
+
+Click the **Skip** button to hide a media file from view. The file is marked as skipped in the annotations and will be automatically passed over when navigating forward or backward.
+
+- The file is not deleted or moved
+- The skip information is stored in `annotations.json` with `"skip": true`
+- Both Next and Previous buttons will skip over these files
+- Use this for files you want to ignore without deleting or moving them
+
+## Set Aside File
+
+Click the **Set Aside** button to move a file to a `set_aside` subfolder.
+This is like deleting a file, but not as severe.
+
+- The file is moved to a `set_aside` folder in the same directory where the file is located
+- For files in the main directory: moved to `main_directory/set_aside/`
+- For files in subfolders: moved to `subfolder/set_aside/` (this keeps files organized by their original location)
+- The file is physically moved (not just marked as skipped)
+- You can recover files by moving them back out of the set_aside folder manually
+- Use this when you're sure you don't want a file and you may want to delete all of the files in the set_aside folder to save space
+
+## Slideshow
 
 Click the **Slideshow** button to automatically cycle through your media files:
 
@@ -135,7 +160,19 @@ Click the **Slideshow** button to automatically cycle through your media files:
 - **Adjust Timing**: Use the editable text field next to the Slideshow button to change how many seconds each image displays. Type a new number (e.g., "10 seconds") and press Enter. The setting is saved and will be used for all future slideshows.
 - **Quick View**: Use a delay time of 1 second or less to have PVA quickly advance through images and videos; this can help you understand the organization.
 
-### Rotate Images
+# Image annotation and display modifications
+
+## Image Annotations
+
+For images, you can add and edit a text description:
+
+1. Click in the text box at the bottom of the screen
+2. Type your annotation (e.g., "Family picnic in the park" or technical details about the photo)
+3. Click elsewhere indicate that you are done editing
+
+The text is automatically saved to the JSON file under the `text` field for that image.
+
+## Rotate Image
 
 Click the **Rotate** button (only available for images) to rotate a photo clockwise:
 
@@ -146,31 +183,11 @@ Click the **Rotate** button (only available for images) to rotate a photo clockw
 
 The rotation preference is saved for the image in the JSON file and will be remembered the next time you view it.
 
-### Skip Files
-
-Click the **Skip** button to hide a media file from view. The file is marked as skipped in the annotations and will be automatically passed over when navigating forward or backward.
-
-- The file is not deleted or moved
-- The skip information is stored in `annotations.json` with `"skip": true`
-- Both Next and Previous buttons will skip over these files
-- Use this for files you want to ignore without deleting or moving them
-
-### Set Aside Files
-
-Click the **Set Aside** button to move a file to a `set_aside` subfolder:
-
-- The file is moved to a `set_aside` folder in the same directory where the file is located
-- For files in the main directory: moved to `main_directory/set_aside/`
-- For files in subfolders: moved to `subfolder/set_aside/` (this keeps files organized by their original location)
-- The file is physically moved (not just marked as skipped)
-- You can recover files by moving them back out of the set_aside folder manually
-- Use this when you're sure you don't want a file and you may want to delete all of the files in the set_aside folder to save space
-
-### Location Information
+## Location Information
 
 The application automatically extracts GPS coordinates from photo metadata using EXIF data. When coordinates are found, it performs a reverse geocoding lookup using OpenStreetMap's Nominatim service to determine the city, state, and country.
 
-#### Automatic Location Detection
+### Automatic Location Detection
 
 When you view a photo with GPS data:
 
@@ -179,7 +196,7 @@ When you view a photo with GPS data:
 3. The location is stored as `location.automated_text` in the JSON file
 4. The location appears in the location dropdown
 
-#### Manual Location Entry
+### Manual Location Entry
 
 You can also manually set or override the location:
 
@@ -190,21 +207,15 @@ You can also manually set or override the location:
 
 The dropdown shows all unique locations (both manual and automated) across all files in your collection, making it easy to maintain consistency.
 
-### Image Annotations
+# Video Display and Annotations
 
-For images, you can add and edit a text description:
+<img src="assets/video.png"
+     alt="Video display and annotation"
+     style="max-width: 900px; width: 100%;
+            border: 1px solid #333;
+            box-sizing: border-box;">
 
-1. Click in the text box at the bottom of the screen
-2. Type your annotation (e.g., "Family picnic in the park" or technical details about the photo)
-3. Click elsewhere indicate that you are done editing
-
-The text is automatically saved to the JSON file under the `text` field for that image.
-
-### Videos and Annotations
-
-Videos support more sophisticated annotation: you can add multiple text annotations at different time points, and mark segments to be automatically skipped.
-
-#### Playing Videos
+## Playing Videos
 
 When you navigate to a video:
 
@@ -214,7 +225,9 @@ When you navigate to a video:
 4. Use **Replay** to restart from the beginning
 5. Click on the progress slider to jump to a specific time, or hover over it to see timestamps
 
-#### Adding Video Annotations
+## Add Video Annotations
+
+Videos support more sophisticated annotation: you can add multiple text annotations at different time points, and mark segments to be automatically skipped.
 
 To add a text annotation at a specific time:
 
@@ -226,7 +239,7 @@ To add a text annotation at a specific time:
 
 You can add as many annotations as you want throughout the video, each with its own timestamp.
 
-#### Editing Video Annotations
+## Edit Video Annotations
 
 To edit an existing annotation:
 
@@ -237,7 +250,7 @@ To edit an existing annotation:
 
 The text is updated while the timestamp remains unchanged.
 
-#### Removing Video Annotations
+## Removing Video Annotations
 
 To delete an annotation:
 
@@ -245,7 +258,7 @@ To delete an annotation:
 2. Click **Remove annotation**
 3. The annotation is deleted and the video returns to the previous annotation
 
-#### Skipping Video Segments
+### Skipping Video Segments
 
 To mark a segment of the video to be automatically skipped during playback:
 
@@ -257,7 +270,7 @@ To mark a segment of the video to be automatically skipped during playback:
 
 This is useful for removing unwanted sections (background noise, false starts, etc.) without deleting the original video file.  You can adjust the slider into a skipped segment to remove the skip annotation, if desired, or to start a new annotation where the video should start playing again.
 
-#### Video Volume Control
+### Video Volume Control
 
 For videos, use the **Volume** button (showing the current volume level) to adjust playback volume:
 
@@ -267,7 +280,7 @@ For videos, use the **Volume** button (showing the current volume level) to adju
 
 Use this to mute videos with too much background noise or to reduce or equalize volume for quieter content.
 
-### Storage and Formats
+## Storage and Formats
 
 All annotations, metadata, and preferences are stored in a JSON file (`annotations.json`) in your media folder. The JSON format makes it easy to:
 
@@ -278,7 +291,7 @@ All annotations, metadata, and preferences are stored in a JSON file (`annotatio
 
 However, be careful with JSON format because the brackets and commas are very important; it is better to avoid editing the JSON file if at all possible.
 
-### Date and Time Handling
+## Date and Time Handling
 
 The application intelligently determines creation dates for your media files:
 
@@ -289,7 +302,7 @@ The application intelligently determines creation dates for your media files:
 
 The goal is that files are always sorted in the order they were taken, regardless of whether they were downloaded, emailed, or copied to your collection.
 
-### JSON File Entries
+## JSON File Entries
 
 Each media file gets an entry in the JSON with:
 - `text`: Text annotation (images) or time-stamped annotations (videos)
@@ -303,7 +316,7 @@ The application also stores settings in the `_settings` object:
 - `image_time`: Number of seconds each image displays during slideshow (default: 5)
 - `font_size`: Font size for text (default: 14)
 
-### Tips and Tricks
+## Tips and Tricks
 
 - **Keyboard Navigation**: Use the arrow keys (→ and ←) to navigate between files quickly
 - **Bulk Organization**: Use Next/Previous to go through all files, pressing Skip or Set Aside on unwanted ones
@@ -314,6 +327,6 @@ The application also stores settings in the `_settings` object:
 
 ---
 
-## Source Code
+# Source Code
 
 [View on GitHub]({{ site.github.repository_url }})
