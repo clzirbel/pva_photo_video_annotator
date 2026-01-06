@@ -10,7 +10,15 @@ layout: default
 [Navigation](#navigation) |
 [Videos](#videos) |
 
-# Overview <a id="overview"></a>
+<nav>
+  <a href="#walkthrough-video">Video</a> |
+  <a href="#features">Features</a> |
+  <a href="#download">Download</a> |
+  <a href="#usage">Usage</a> |
+  <a href="https://github.com/clzirbel/pva_photo_video_annotator">GitHub</a>
+</nav>
+
+---
 
 {% include description.md %}
 
