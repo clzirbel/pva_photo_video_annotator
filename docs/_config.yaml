@@ -8,11 +8,6 @@ plugins:
 github:
   is_project_page: true
 
-header_pages:
-  - index.md
-  - download.md
-  - usage.md
-
 author: Craig L. Zirbel
 keywords:
   - video annotation
