@@ -165,19 +165,35 @@ def get_exif_datetime(path):
 
 def get_video_creation_time(path):
     """Extract creation time for videos using MediaInfo (QuickTime/MP4 metadata).
-    For MOV files: Uses timezone-aware creation date when available.
-    Returns tuple (epoch, display_string) for MOV files, or just epoch for other videos.
+    Extracts timezone-aware creation date when available (all video formats).
+    Returns tuple (epoch, display_string, has_timezone, tz_label) where:
+      - epoch: Unix timestamp (UTC) for sorting
+      - display_string: Wall-clock time as recorded by camera (local time)
+      - has_timezone: True if timezone info was found and used, False if using fallback
+      - tz_label: A human-readable timezone offset like "+07:00" when available, else None
     """
     if not MEDIAINFO_AVAILABLE:
-        return 0
+        return (0, "", False, None)
     try:
         mi = MediaInfo.parse(path)
     except Exception:
         mi = None
 
-    is_mov = ".mov" in str(path).lower()
-
     candidates = []  # list of tuples (source, raw_value, parsed_ts)
+
+    def format_offset(tzinfo_obj):
+        """Return +HH:MM or -HH:MM from tzinfo.utcoffset()."""
+        try:
+            offset = tzinfo_obj.utcoffset(None)
+            if offset is None:
+                return None
+            total_minutes = int(offset.total_seconds() // 60)
+            sign = "+" if total_minutes >= 0 else "-"
+            total_minutes = abs(total_minutes)
+            hours, minutes = divmod(total_minutes, 60)
+            return f"{sign}{hours:02d}:{minutes:02d}"
+        except Exception:
+            return None
 
     def add_candidate(label, raw):
         ts = parse_datetime_string(raw)
@@ -193,11 +209,11 @@ def get_video_creation_time(path):
                 add_candidate(label or key, val)
 
         # QuickTime specific - check for the creation date with timezone info FIRST
-        # Example: "2025-11-25T17:41:26+0700" (already has timezone!)
-        # Handle this WITHOUT calling parse_datetime_string to avoid debug spam
+        # Example: "2025-11-28T09:12:31+0700" (already has timezone!)
+        # This works for both .mov and .mp4 files with QuickTime metadata
         qt_date = data.get('comapplequicktimecreationdate')
-        if qt_date and is_mov:
-            # For MOV: add with special marker so we handle it separately
+        if qt_date:
+            # Add with special marker so we handle it separately with timezone awareness
             candidates.append(('comapplequicktimecreationdate', qt_date, None))
 
         add_field('com.apple.quicktime.creationdate', 'qt_creationdate')
@@ -244,65 +260,62 @@ def get_video_creation_time(path):
 
     # Choose first parsed in order we collected
     for source, raw, ts in candidates:
-        # Special handling for MOV timezone-aware dates
+        # Special handling for timezone-aware dates (both MOV and MP4)
         if source == 'comapplequicktimecreationdate' and isinstance(raw, str):
             try:
-                # Format: "2025-11-25T17:41:26+0700" - already has timezone!
-                # Extract the local time (what was recorded) and epoch
+                # Format: "2025-11-28T09:12:31+0700" - ISO 8601 with timezone offset
+                # datetime.fromisoformat() handles the +0700 timezone correctly
                 dt_aware = datetime.fromisoformat(str(raw))
+                # Extract the local/wall-clock time (what the camera showed)
                 local_time = dt_aware.replace(tzinfo=None)
                 display = local_time.strftime("%Y/%m/%d %H:%M:%S")
+                # Epoch is the UTC moment equivalent to this local time
                 correct_epoch = dt_aware.timestamp()
-                return (correct_epoch, display)
+                tz_label = format_offset(dt_aware.tzinfo)
+                return (correct_epoch, display, True, tz_label)  # True = timezone was found
             except Exception:
                 pass
 
-        # Standard path for other timestamps
+        # Standard path for other timestamps (no timezone info)
         if ts:
-            # For MOV files, return tuple (epoch, display_string)
-            if is_mov and source != 'comapplequicktimecreationdate':
-                # Format the timestamp for MOV files
-                display = datetime.fromtimestamp(ts).strftime("%Y/%m/%d %H:%M:%S")
-                return (ts, display)
-            # For other videos, return just the epoch
-            return ts
+            display = datetime.fromtimestamp(ts).strftime("%Y/%m/%d %H:%M:%S")
+            return (ts, display, False, None)  # False = no timezone info
 
-    return 0
+    # No valid creation time found
+    return (0, "", False, None)
 
 def get_file_creation_time(path):
     """Get file creation time with proper timezone handling.
-    For images: EXIF is naive local time (return as string directly)
-    For videos: MediaInfo contains UTC times (return as epoch)
-    For filesystem: timestamps are UTC, convert to local display
-    Returns tuple: (sortable_epoch, display_string)
+    For images: EXIF is naive local time (extracted as wall-clock)
+    For videos: MediaInfo contains timezone-aware QuickTime dates (extract wall-clock from tz)
+    For filesystem: timestamps are UTC, use as fallback
+    Returns tuple: (sortable_epoch, display_string, has_timezone, tz_label)
+      - sortable_epoch: Unix timestamp for sorting
+      - display_string: Wall-clock time (camera's local time)
+      - has_timezone: True if timezone info was found, False if using fallback
+      - tz_label: human-readable tz offset like "+07:00" when known, else None
     """
     try:
         suffix = path.suffix.lower()
 
-        # For images: get EXIF datetime (naive local time stored as string)
+        # For images: get EXIF datetime (naive local time, assume camera's local timezone)
         if suffix in SUPPORTED_IMAGES:
             exif_str = get_exif_datetime(path)
             if exif_str and exif_str != 0:
                 # Parse it to get an epoch for sorting (treating string as naive/local)
                 dt_obj = datetime.strptime(exif_str, DATETIME_FMT)
                 sort_epoch = dt_obj.timestamp()
-                return (sort_epoch, exif_str)
+                return (sort_epoch, exif_str, False, None)  # EXIF has no tz info, needs inference
 
-        # For videos: get MediaInfo metadata (UTC times converted to epoch)
+        # For videos: get MediaInfo metadata with timezone extraction
         if suffix in SUPPORTED_VIDEOS:
             video_result = get_video_creation_time(path)
 
-            # MOV files return (epoch, display_string) tuple
-            if isinstance(video_result, tuple) and len(video_result) == 2:
-                video_epoch, display = video_result
-                return (video_epoch, display)
-
-            # Other video formats return just the epoch
-            if video_result > 0:
-                # video_epoch is already UTC-converted epoch via calendar.timegm()
-                # Display using fromtimestamp (converts UTC to local for display)
-                display = datetime.fromtimestamp(video_result).strftime(DATETIME_FMT)
-                return (video_result, display)
+            # get_video_creation_time returns (epoch, display_string, has_timezone)
+            if isinstance(video_result, tuple) and len(video_result) == 4:
+                video_epoch, display, has_tz, tz_label = video_result
+                if video_epoch > 0:  # Valid result found
+                    return (video_epoch, display, has_tz, tz_label)
 
         # Fall back to filesystem timestamps (these are stored in UTC)
         stat = path.stat()
@@ -318,9 +331,9 @@ def get_file_creation_time(path):
         earliest = min(times)
         # Convert UTC epoch to local time for display
         display = datetime.fromtimestamp(earliest).strftime(DATETIME_FMT)
-        return (earliest, display)
+        return (earliest, display, False, None)  # False because filesystem has no tz info
     except:
-        return (0, "")
+        return (0, "", False, None)
 
 
 def get_exif_rotation(path):
@@ -777,18 +790,111 @@ class PVAnnotator(QWidget):
         # Normalize any stored creation times to the new string format
         self.normalize_creation_times()
         self.check_and_prompt_folders()
+        # Inform user while we load and compute timestamps
+        try:
+            self.text_box.blockSignals(True)
+            self.text_box.setText("Loading data and checking file creation times")
+        finally:
+            self.text_box.blockSignals(False)
+        # Force UI update so user sees the message
+        QApplication.processEvents()
         # Get all media files
         all_files = list(self.get_all_media_files())
-        # Cache creation times for new files (batch operation)
+        
+        # Step 1: Ensure all files have creation_time_utc and local_time_zone (if available)
         needs_save = False
         for file_path in all_files:
-            if file_path.name not in self.data or "creation_time" not in self.data.get(file_path.name, {}):
+            if file_path.name not in self.data or "creation_time_utc" not in self.data.get(file_path.name, {}):
                 self.get_cached_creation_time(file_path)
                 needs_save = True
         if needs_save:
             self.save()
-        # Sort using cached creation times
-        self.media=sorted(all_files, key=lambda p: self.get_cached_creation_time(p))
+        
+        # Step 2: Sort all files by creation_time_utc for timezone inference
+        sorted_by_utc = sorted(all_files, key=lambda p: self.data.get(p.name, {}).get("creation_time_utc", 9999999999))
+        
+        # Step 3: Infer timezones for files without them
+        last_known_tz = None
+        for file_path in sorted_by_utc:
+            entry = self.data.get(file_path.name, {})
+            if "local_time_zone" in entry:
+                last_known_tz = entry["local_time_zone"]
+            elif last_known_tz and "local_time_zone_inferred" not in entry:
+                entry["local_time_zone_inferred"] = last_known_tz
+                needs_save = True
+        
+        if needs_save:
+            self.save()
+        
+        # Step 4: Compute creation_date_time using actual or inferred timezone.
+        # If we only have a wall-clock (no tz), keep that wall-clock untouched.
+        save_needed = False
+        for file_path in all_files:
+            entry = self.data.get(file_path.name, {})
+            utc_epoch = entry.get("creation_time_utc", 0)
+            tz_str = entry.get("local_time_zone") or entry.get("local_time_zone_inferred")
+            naive_wall_clock = entry.get("creation_local_naive")
+
+            # If we have a wall-clock and a timezone, recompute both UTC and display time from that wall-clock
+            if tz_str and naive_wall_clock:
+                try:
+                    from datetime import timezone, timedelta
+                    sign = 1 if tz_str[0] == '+' else -1
+                    hours, minutes = map(int, tz_str[1:].split(':'))
+                    offset = timedelta(hours=sign*hours, minutes=sign*minutes)
+                    tz = timezone(offset)
+                    dt_local = datetime.strptime(naive_wall_clock, DATETIME_FMT)
+                    dt_local = dt_local.replace(tzinfo=tz)
+                    entry["creation_time_utc"] = dt_local.astimezone(timezone.utc).timestamp()
+                    entry["creation_date_time"] = naive_wall_clock
+                    save_needed = True
+                    continue
+                except Exception:
+                    pass
+
+            # If we have timezone and UTC, compute display time
+            if tz_str and utc_epoch:
+                try:
+                    from datetime import timezone, timedelta
+                    sign = 1 if tz_str[0] == '+' else -1
+                    hours, minutes = map(int, tz_str[1:].split(':'))
+                    offset = timedelta(hours=sign*hours, minutes=sign*minutes)
+                    tz = timezone(offset)
+                    local_dt = datetime.fromtimestamp(utc_epoch, tz=tz)
+                    entry["creation_date_time"] = local_dt.strftime(DATETIME_FMT)
+                    save_needed = True
+                    continue
+                except Exception:
+                    pass
+
+            # If no timezone but we have a wall-clock, keep it as-is
+            if naive_wall_clock:
+                entry.setdefault("creation_date_time", naive_wall_clock)
+                continue
+
+            # Fallbacks when we have only UTC
+            if utc_epoch:
+                entry["creation_date_time"] = format_creation_timestamp(utc_epoch)
+                save_needed = True
+        
+        if save_needed:
+            self.save()
+        
+        # Step 5: Sort using creation_date_time (or creation_time_manual if present)
+        def sort_key(p):
+            entry = self.data.get(p.name, {})
+            # Priority: creation_time_manual > creation_date_time
+            if "creation_time_manual" in entry:
+                ts = parse_creation_value(entry["creation_time_manual"])
+                if ts is not None:
+                    return ts
+            if "creation_date_time" in entry:
+                ts = parse_creation_value(entry["creation_date_time"])
+                if ts is not None:
+                    return ts
+            return 9999999999  # Far future for files with no time
+        
+        self.media = sorted(all_files, key=sort_key)
         if start_path and start_path.is_file() and start_path in self.media:
             self.index=self.media.index(start_path)
         # Sort video annotations
@@ -811,68 +917,80 @@ class PVAnnotator(QWidget):
         else:
             time_str = str(image_time)
         self.image_time_input.setText(f"{time_str} {time_text}")
+        # Clear loading message before showing item
+        try:
+            self.text_box.blockSignals(True)
+            self.text_box.setText("")
+        finally:
+            self.text_box.blockSignals(False)
         self.show_item()
 
     # ---------------- Helpers ----------------
     def normalize_creation_times(self):
-        """Convert any numeric/legacy creation times to the saved string format."""
+        """Convert any numeric/legacy manual creation times to the saved string format.
+        Note: legacy creation_time is left untouched per requirements.
+        """
         changed = False
         for name, entry in self.data.items():
             if name == "_settings" or not isinstance(entry, dict):
                 continue
-            for key in ("creation_time", "creation_time_manual"):
-                if key in entry:
-                    ts = parse_creation_value(entry[key])
-                    if ts is not None:
-                        formatted = format_creation_timestamp(ts)
-                        if entry[key] != formatted:
-                            entry[key] = formatted
-                            changed = True
+            # Only normalize manual override field; leave creation_time untouched
+            key = "creation_time_manual"
+            if key in entry:
+                ts = parse_creation_value(entry[key])
+                if ts is not None:
+                    formatted = format_creation_timestamp(ts)
+                    if entry[key] != formatted:
+                        entry[key] = formatted
+                        changed = True
         if changed:
             self.save()
 
     def current(self): return self.media[self.index]
-
     def get_cached_creation_time(self, file_path):
-        """Get creation time from cache or filesystem, updating cache if needed."""
+        """Get or compute creation_time_utc and local_time_zone for a file.
+        Stores creation_time_utc (epoch) and local_time_zone (if available) in JSON.
+        Also stores creation_local_naive when the file only provides a wall-clock time with no timezone.
+        Returns the UTC epoch for initial sorting.
+        """
         filename = file_path.name
         entry = self.data.setdefault(filename, {})
 
-        if "creation_time_manual" in entry:
-            manual_value = entry["creation_time_manual"]
-            if isinstance(manual_value, str):
-                ts = parse_creation_value(manual_value)
-                if ts is not None:
-                    return ts
-            if isinstance(manual_value, (int, float)):
-                return float(manual_value)
+        # If creation_time_utc is missing OR if no timezone data exists, re-extract
+        needs_extraction = (
+            "creation_time_utc" not in entry
+            or ("local_time_zone" not in entry and "local_time_zone_inferred" not in entry)
+        )
 
-        if "creation_time" in entry and entry["creation_time"] is not None:
-            cached_ts = parse_creation_value(entry["creation_time"])
-            if cached_ts is not None:
-                return cached_ts
+        if needs_extraction:
+            creation_time_tuple = get_file_creation_time(file_path)
 
-        # Only compute if not already cached
-        creation_time_tuple = get_file_creation_time(file_path)
+            # Handle tuple return (utc_epoch, display_string, has_timezone, tz_label)
+            if isinstance(creation_time_tuple, tuple) and len(creation_time_tuple) == 4:
+                utc_epoch, display_string, has_timezone, tz_label = creation_time_tuple
+            else:
+                utc_epoch = creation_time_tuple if creation_time_tuple else 0
+                display_string = ""
+                tz_label = None
 
-        # Handle tuple return (timestamp, display_string) or fallback to old behavior
-        if isinstance(creation_time_tuple, tuple):
-            creation_time, display_string = creation_time_tuple
-        else:
-            creation_time = creation_time_tuple
-            display_string = None
+            # Store UTC epoch (use far-future fallback when absent)
+            if utc_epoch == 0 or utc_epoch == "":
+                entry["creation_time_utc"] = datetime(2100, 1, 1, 0, 10, 0).timestamp()
+            else:
+                entry["creation_time_utc"] = utc_epoch
 
-        # If no valid creation time found, use default date (2100-01-01 00:10:00) to sort files to the end
-        if creation_time == 0 or creation_time == "":
-            default_date = datetime(2100, 1, 1, 0, 10, 0).timestamp()
-            creation_time = default_date
-            display_string = format_creation_timestamp(creation_time)
-        elif display_string is None:
-            # Only format if display_string wasn't already provided by get_file_creation_time()
-            display_string = format_creation_timestamp(creation_time)
+            # Store timezone if available from file metadata
+            if tz_label:
+                entry["local_time_zone"] = tz_label
+                # Remove inferred timezone if we found an actual one
+                if "local_time_zone_inferred" in entry:
+                    del entry["local_time_zone_inferred"]
+            else:
+                # Capture the wall-clock time for later use with inferred/known tz
+                if display_string and "creation_local_naive" not in entry:
+                    entry["creation_local_naive"] = display_string
 
-        entry["creation_time"] = display_string
-        return creation_time
+        return entry["creation_time_utc"]
 
     def validate_datetime(self, dt_string):
         """Validate and convert YYYY/MM/DD HH:MM:SS (or legacy YYYY-MM-DD) to Unix timestamp."""
@@ -1004,24 +1122,26 @@ class PVAnnotator(QWidget):
         # Extract location data if available
         self.extract_and_store_location(p)
 
-        # Use cached creation time for display
+        # Display the time value used for sorting
         filename = p.name
         entry = self.data.get(filename, {})
-        # Prefer manual timestamp when present, even if blank; fall back to auto/derived
-        def to_display(raw_value):
-            ts_val = parse_creation_value(raw_value)
-            if ts_val is not None:
-                return format_creation_timestamp(ts_val)
-            return str(raw_value) if raw_value is not None else None
-
+        
+        # Priority: creation_time_manual > creation_date_time
         ts = None
         if "creation_time_manual" in entry:
-            ts = to_display(entry.get("creation_time_manual"))
-        if ts is None and "creation_time" in entry:
-            ts = to_display(entry.get("creation_time"))
+            manual_val = entry.get("creation_time_manual")
+            if isinstance(manual_val, str):
+                ts = manual_val
+            else:
+                epoch = parse_creation_value(manual_val)
+                if epoch is not None:
+                    ts = format_creation_timestamp(epoch)
+        
+        if ts is None and "creation_date_time" in entry:
+            ts = entry.get("creation_date_time")
+        
         if ts is None:
-            creation_time = self.get_cached_creation_time(p)
-            ts = format_creation_timestamp(creation_time)
+            ts = "No date/time"
 
         # Update datetime box (editable)
         self.datetime_box.blockSignals(True)
