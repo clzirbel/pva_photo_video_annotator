@@ -1032,10 +1032,14 @@ class PVAnnotator(QWidget):
         # Build a fast lookup set of video filenames for O(1) lookup
         video_names = {p.name for p in self.media if p.suffix.lower() in SUPPORTED_VIDEOS}
 
-        # Clean up rotation field for videos (rotation only applies to images)
+        # Clean up fields that should not be written to JSON
         for filename in self.data:
-            if filename != "_settings" and filename in video_names:
-                self.data[filename].pop("rotation", None)
+            if filename != "_settings":
+                # Remove rotation for videos (rotation only applies to images)
+                if filename in video_names:
+                    self.data[filename].pop("rotation", None)
+                # Remove legacy creation_time field (we use creation_time_utc, creation_date_time, etc.)
+                self.data[filename].pop("creation_time", None)
 
         self.json_path.write_text(json.dumps(self.data,indent=2))
 
