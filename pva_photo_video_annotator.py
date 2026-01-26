@@ -616,6 +616,8 @@ class TimestampSlider(QSlider):
                 width = self.width()
                 value = int((x_pos / width) * self.maximum())
                 self.setValue(value)
+                # Emit sliderMoved signal to trigger position and annotation updates
+                self.sliderMoved.emit(value)
         return super().mousePressEvent(event)
 
 class PVAnnotator(QWidget):
@@ -713,6 +715,7 @@ class PVAnnotator(QWidget):
         self.video_player.positionChanged.connect(lambda pos: self.update_video_annotation(pos))
         self.video_player.positionChanged.connect(lambda pos: self.video_slider.setValue(pos))
         self.video_player.durationChanged.connect(lambda d: self.video_slider.setMaximum(d))
+        self.video_player.mediaStatusChanged.connect(self.handle_video_end)
 
         self.play_btn=QPushButton("Play/Pause"); self.play_btn.clicked.connect(lambda: self.handle_button_click(self.toggle_play))
         self.replay_btn=QPushButton("Replay"); self.replay_btn.clicked.connect(lambda: self.handle_button_click(self.replay_video))
@@ -902,12 +905,21 @@ class PVAnnotator(QWidget):
             if "annotations" in entry and isinstance(entry["annotations"], list):
                 entry["annotations"] = sorted(entry["annotations"], key=lambda a: a["time"])
 
-        # Ensure every video has a baseline 0.0 annotation for the "no annotation yet" state
+        # Deduplicate and ensure every video has a baseline 0.0 annotation
+        needs_save_after_dedup = False
         for media_path in self.media:
             if media_path.suffix.lower() in SUPPORTED_VIDEOS:
                 annotations = self.data.setdefault(media_path.name, {}).setdefault("annotations", [])
+                # First deduplicate any duplicate timestamps
+                if self.deduplicate_annotations(annotations):
+                    needs_save_after_dedup = True
+                # Then ensure we have a 0.0 annotation
                 if self.ensure_zero_annotation(annotations):
-                    pass  # save happens later in show_item
+                    needs_save_after_dedup = True
+        
+        if needs_save_after_dedup:
+            self.save()
+        
         # Update image time display
         image_time = self.get_image_time()
         time_text = "second" if image_time == 1 else "seconds"
@@ -1231,6 +1243,43 @@ class PVAnnotator(QWidget):
             self.image_label.setText("Select a folder to begin")
 
     # ---------------- Video Annotation ----------------
+    def deduplicate_annotations(self, annotations):
+        """Remove duplicate annotations at the same timestamp, keeping the one with non-empty skip and text."""
+        if not annotations:
+            return False
+        
+        # Group annotations by time
+        from collections import defaultdict
+        time_groups = defaultdict(list)
+        for ann in annotations:
+            time_groups[ann.get("time", 0.0)].append(ann)
+        
+        # Check if we have any duplicates
+        has_duplicates = any(len(group) > 1 for group in time_groups.values())
+        if not has_duplicates:
+            return False
+        
+        # For each time with duplicates, keep the best one
+        kept_annotations = []
+        for time_val, group in time_groups.items():
+            if len(group) == 1:
+                kept_annotations.append(group[0])
+            else:
+                # Sort by priority: non-empty text, then skip flag, then first one
+                def priority(ann):
+                    has_text = bool(ann.get("text", "").strip())
+                    has_skip = bool(ann.get("skip", False))
+                    return (has_text, has_skip)
+                
+                best_ann = max(group, key=priority)
+                kept_annotations.append(best_ann)
+        
+        # Replace the list contents
+        annotations.clear()
+        annotations.extend(kept_annotations)
+        annotations.sort(key=lambda a: a.get("time", 0.0))
+        return True
+
     def ensure_zero_annotation(self, annotations):
         """Guarantee a time 0.0 annotation exists so the pre-first-annotation area stays blank."""
         zero_ann = next((a for a in annotations if a.get("time") == 0.0), None)
@@ -1351,13 +1400,13 @@ class PVAnnotator(QWidget):
                     # Last annotation: just pause here
                     self.video_player.pause()
                     self.text_box.blockSignals(True)
-                    self.text_box.setText(ann.get("text", "Segment skipped"))
+                    self.text_box.setText("Segment skipped")
                     self.text_box.blockSignals(False)
                 return
             else:
-                # Paused or manual seek: show text
+                # Paused or manual seek: always show "Segment skipped"
                 self.text_box.blockSignals(True)
-                self.text_box.setText(ann.get("text", "Segment skipped"))
+                self.text_box.setText("Segment skipped")
                 self.text_box.blockSignals(False)
                 return
 
@@ -1366,6 +1415,38 @@ class PVAnnotator(QWidget):
         self.text_box.setText(ann.get("text", ""))
         self.text_box.blockSignals(False)
 
+    def handle_video_end(self, status):
+        """Handle video reaching the end - reset to first non-skipped segment or beginning."""
+        from PySide6.QtMultimedia import QMediaPlayer
+        
+        # Only handle EndOfMedia status
+        if status != QMediaPlayer.MediaStatus.EndOfMedia:
+            return
+        
+        # If in slideshow mode, let the slideshow timer handle advancement
+        if self.slideshow:
+            return
+        
+        # Find first non-skipped annotation
+        p = self.current()
+        if p.suffix.lower() in SUPPORTED_VIDEOS:
+            annotations = self.get_current_video_annotations()
+            
+            # Find the first non-skipped annotation
+            reset_time = 0  # Default to beginning if all are skipped
+            if annotations:
+                annotations.sort(key=lambda a: a["time"])
+                for ann in annotations:
+                    if not ann.get("skip", False):
+                        reset_time = ann["time"]
+                        break
+            
+            # Reset to the appropriate position, pause, and show annotation
+            reset_pos_ms = int(reset_time * 1000)
+            self.video_player.setPosition(reset_pos_ms)
+            self.video_player.pause()
+            # Update annotation to show the appropriate timestamp annotation
+            self.update_video_annotation(reset_pos_ms)
 
     def skip_until_next_annotation(self):
         self.stop_slideshow_if_running()
