@@ -7,8 +7,8 @@ import os
 from tinytag import TinyTag
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton,
     QTextEdit, QVBoxLayout, QHBoxLayout, QComboBox, QSlider, QFileDialog, QMessageBox, QLineEdit, QProgressDialog)
-from PySide6.QtCore import Qt, QTimer, QUrl, QPoint, QLoggingCategory
-from PySide6.QtGui import QPixmap, QImage, QFont, QColor, QTextCursor
+from PySide6.QtCore import Qt, QTimer, QUrl, QPoint, QLoggingCategory, QRect
+from PySide6.QtGui import QPixmap, QImage, QFont, QColor, QTextCursor, QPainter, QPen
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PIL import Image, ExifTags, ImageOps
@@ -620,6 +620,96 @@ class TimestampSlider(QSlider):
                 self.sliderMoved.emit(value)
         return super().mousePressEvent(event)
 
+class CropImageLabel(QLabel):
+    """Custom label for handling crop selection on images."""
+    crop_selected = None  # Signal-like attribute, will be set by parent
+    
+    def __init__(self, alignment=None, parent=None):
+        super().__init__(parent)
+        if alignment:
+            self.setAlignment(alignment)
+        self.crop_mode = False
+        self.crop_start = None
+        self.crop_rect = None
+        self.original_pixmap = None
+        self.setMouseTracking(True)
+    
+    def mousePressEvent(self, event):
+        if self.crop_mode and self.original_pixmap:
+            self.crop_start = event.position()
+            self.crop_rect = None
+            self.update()
+    
+    def mouseMoveEvent(self, event):
+        if self.crop_mode and self.crop_start and self.original_pixmap:
+            # Create rectangle from start to current position
+            self.crop_rect = (self.crop_start, event.position())
+            self.update()
+    
+    def mouseReleaseEvent(self, event):
+        if self.crop_mode and self.crop_start and self.original_pixmap:
+            # Finalize crop
+            end_pos = event.position()
+            
+            # Check if a meaningful rectangle was drawn
+            if abs(end_pos.x() - self.crop_start.x()) > 5 and abs(end_pos.y() - self.crop_start.y()) > 5:
+                if callable(self.crop_selected):
+                    # Get the actual pixmap being displayed
+                    pixmap = self.pixmap()
+                    if pixmap:
+                        # The label is aligned center, so we need to account for offsets
+                        label_rect = self.contentsRect()
+                        pix_width = pixmap.width()
+                        pix_height = pixmap.height()
+                        
+                        # Calculate the centered position of the pixmap in the label
+                        pix_x = (label_rect.width() - pix_width) / 2
+                        pix_y = (label_rect.height() - pix_height) / 2
+                        
+                        # Convert label coordinates to image coordinates
+                        x1 = int((self.crop_start.x() - pix_x) * self.original_pixmap.width() / pix_width)
+                        y1 = int((self.crop_start.y() - pix_y) * self.original_pixmap.height() / pix_height)
+                        x2 = int((end_pos.x() - pix_x) * self.original_pixmap.width() / pix_width)
+                        y2 = int((end_pos.y() - pix_y) * self.original_pixmap.height() / pix_height)
+                        
+                        # Clamp to image bounds
+                        x1 = max(0, min(x1, self.original_pixmap.width()))
+                        y1 = max(0, min(y1, self.original_pixmap.height()))
+                        x2 = max(0, min(x2, self.original_pixmap.width()))
+                        y2 = max(0, min(y2, self.original_pixmap.height()))
+                        
+                        # Ensure coordinates are in order
+                        crop_coords = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+                        self.crop_selected(crop_coords)
+            
+            self.crop_start = None
+            self.crop_rect = None
+            self.update()
+    
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        # Draw crop selection rectangle
+        if self.crop_mode and self.crop_rect:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            # Calculate width and height properly
+            x1 = min(self.crop_rect[0].x(), self.crop_rect[1].x())
+            y1 = min(self.crop_rect[0].y(), self.crop_rect[1].y())
+            x2 = max(self.crop_rect[0].x(), self.crop_rect[1].x())
+            y2 = max(self.crop_rect[0].y(), self.crop_rect[1].y())
+            
+            width = x2 - x1
+            height = y2 - y1
+            
+            # Draw semi-transparent blue rectangle
+            color = QColor(0, 0, 255, 50)
+            painter.fillRect(int(x1), int(y1), int(width), int(height), color)
+            
+            # Draw blue border
+            painter.setPen(QPen(QColor(0, 0, 255), 2))
+            painter.drawRect(int(x1), int(y1), int(width), int(height))
+
 class PVAnnotator(QWidget):
     def __init__(self,start_path=None):
         super().__init__()
@@ -634,10 +724,12 @@ class PVAnnotator(QWidget):
         self.dir=None; self.media=[]; self.index=0
         self.data={}; self.slideshow=False
         self.timer=QTimer(); self.timer.timeout.connect(self.advance_slideshow)
+        self.media_to_data_key = {}  # Maps index in self.media to data key (may include ##version)
 
         # Widgets
-        self.image_label=QLabel(alignment=Qt.AlignCenter)
+        self.image_label=CropImageLabel(alignment=Qt.AlignCenter)
         self.image_label.setStyleSheet("background-color: white;")
+        self.image_label.crop_selected = self.apply_crop  # Set the crop callback
         self.prev_btn=QPushButton("Previous")
         self.position_box=QLineEdit()
         self.position_box.setFixedWidth(120)
@@ -649,6 +741,10 @@ class PVAnnotator(QWidget):
         self.show_skipped_mode = False  # Track whether we're in show skipped mode
         self.trash_btn=QPushButton("Discard")
         self.rotate_btn=QPushButton("Rotate clockwise")
+        self.duplicate_btn=QPushButton("Duplicate")
+        self.crop_btn=QPushButton("Crop")
+        self.crop_mode = False  # Track whether we're in crop selection mode
+        self.crop_start = None  # Starting point for crop selection
         self.volume_btn=QPushButton("100% volume")
         self.slide_btn=QPushButton("Slideshow")
         self.image_time_input=QLineEdit()
@@ -661,7 +757,7 @@ class PVAnnotator(QWidget):
         # Make button text bold
         bold_font = QFont()
         bold_font.setBold(True)
-        for btn in [self.prev_btn, self.skip_btn, self.show_skipped_btn, self.trash_btn, self.rotate_btn, self.volume_btn, self.slide_btn, self.next_btn]:
+        for btn in [self.prev_btn, self.skip_btn, self.show_skipped_btn, self.trash_btn, self.rotate_btn, self.duplicate_btn, self.crop_btn, self.volume_btn, self.slide_btn, self.next_btn]:
             btn.setFont(bold_font)
             # Fix for Linux/Mac: ensure button text is visible
             if sys.platform.startswith('linux') or sys.platform == 'darwin':
@@ -669,8 +765,8 @@ class PVAnnotator(QWidget):
         for b,f in [(self.prev_btn,self.prev_item),(self.next_btn,self.next_item),
                 (self.skip_btn,self.skip_item),(self.show_skipped_btn,self.toggle_show_skipped),
                 (self.trash_btn,self.trash_item),
-                (self.rotate_btn,self.rotate_item),(self.volume_btn,self.change_volume),
-                (self.slide_btn,self.toggle_slideshow)]: b.clicked.connect(lambda _, func=f: self.handle_button_click(func))
+                (self.rotate_btn,self.rotate_item),(self.duplicate_btn,self.duplicate_item),(self.crop_btn,self.toggle_crop_mode),
+                (self.volume_btn,self.change_volume),(self.slide_btn,self.toggle_slideshow)]: b.clicked.connect(lambda _, func=f: self.handle_button_click(func))
 
         self.datetime_box=QLineEdit(); self.datetime_box.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
         self.datetime_box.editingFinished.connect(self.update_creation_time)
@@ -688,7 +784,7 @@ class PVAnnotator(QWidget):
         self.search_left_btn=QPushButton("<"); self.search_left_btn.setMaximumWidth(35)
         self.search_left_btn.clicked.connect(lambda: self.search_files(direction=-1))
         self.search_box=QLineEdit(); self.search_box.setPlaceholderText("Search")
-        self.search_box.textChanged.connect(self.search_files)
+        self.search_box.textChanged.connect(lambda: self.search_files(direction=0))
         self.search_right_btn=QPushButton(">"); self.search_right_btn.setMaximumWidth(35)
         self.search_right_btn.clicked.connect(lambda: self.search_files(direction=1))
         self.text_box=QTextEdit(); self.text_box.setFixedHeight(75)
@@ -759,17 +855,17 @@ class PVAnnotator(QWidget):
         layout.addLayout(video_btn_layout)
         button_layout=QHBoxLayout()
         button_layout.setSpacing(2)
-        for b in [self.prev_btn,self.position_box,self.skip_btn,self.show_skipped_btn,self.trash_btn,self.rotate_btn,self.volume_btn,self.slide_btn]: button_layout.addWidget(b)
+        for b in [self.prev_btn,self.position_box,self.skip_btn,self.show_skipped_btn,self.trash_btn,self.rotate_btn,self.duplicate_btn,self.crop_btn,self.volume_btn,self.slide_btn]: button_layout.addWidget(b)
         button_layout.addWidget(self.image_time_input)
         button_layout.addWidget(self.next_btn)
         layout.addLayout(button_layout)
         meta_layout=QHBoxLayout()
         meta_layout.setSpacing(2)
-        # Restored datetime (3.0), narrowed filename further to 6.4, search box 1.5, location 6.3
-        meta_layout.addWidget(self.datetime_box, 3.0)
+        # Datetime: 2.7 (reduced 10%), filename: 6.4, search: 1.8 (increased 10%), location: 6.3
+        meta_layout.addWidget(self.datetime_box, 2.7)
         meta_layout.addWidget(self.filename_label, 6.4)
         meta_layout.addWidget(self.search_left_btn, 0.3)
-        meta_layout.addWidget(self.search_box, 1.5)  # 50% width of datetime box
+        meta_layout.addWidget(self.search_box, 1.8)  # 10% larger to compensate for datetime reduction
         meta_layout.addWidget(self.search_right_btn, 0.3)
         meta_layout.addWidget(self.location_combo, 6.3)
         layout.addLayout(meta_layout)
@@ -825,22 +921,39 @@ class PVAnnotator(QWidget):
         # Get all media files
         all_files = list(self.get_all_media_files())
         
+        # Build a map of base filenames to their versioned keys
+        from collections import defaultdict
+        base_to_versions = defaultdict(list)
+        for data_key in self.data.keys():
+            if data_key != "_settings":
+                base = self.get_base_filename(data_key)
+                base_to_versions[base].append(data_key)
+        
         # Step 1: Ensure all files have creation_time_utc and local_time_zone (if available)
         needs_save = False
         for file_path in all_files:
-            if file_path.name not in self.data or "creation_time_utc" not in self.data.get(file_path.name, {}):
-                self.get_cached_creation_time(file_path)
-                needs_save = True
+            base = self.get_base_filename(file_path.name)
+            # Check if this file has versioned entries - if so, skip creating a base entry
+            versions = base_to_versions.get(base, [])
+            has_versioned_entries = any("##" in v for v in versions)
+            
+            # Only process if: no versions exist, OR this exact filename exists in data
+            if not has_versioned_entries:
+                if file_path.name not in self.data or "creation_time_utc" not in self.data.get(file_path.name, {}):
+                    self.get_cached_creation_time(file_path)
+                    needs_save = True
         if needs_save:
             self.save()
         
-        # Step 2: Sort all files by creation_time_utc for timezone inference
-        sorted_by_utc = sorted(all_files, key=lambda p: self.data.get(p.name, {}).get("creation_time_utc", 9999999999))
+        # Step 2: Sort all data entries by creation_time_utc for timezone inference
+        # Use all keys (including versioned ones), not just physical files
+        all_data_keys = [k for k in self.data.keys() if k != "_settings"]
+        sorted_keys = sorted(all_data_keys, key=lambda k: self.data.get(k, {}).get("creation_time_utc", 9999999999))
         
         # Step 3: Infer timezones for files without them
         last_known_tz = None
-        for file_path in sorted_by_utc:
-            entry = self.data.get(file_path.name, {})
+        for data_key in sorted_keys:
+            entry = self.data.get(data_key, {})
             if "local_time_zone" in entry:
                 last_known_tz = entry["local_time_zone"]
             elif last_known_tz and "local_time_zone_inferred" not in entry:
@@ -853,8 +966,8 @@ class PVAnnotator(QWidget):
         # Step 4: Compute creation_date_time using actual or inferred timezone.
         # If we only have a wall-clock (no tz), keep that wall-clock untouched.
         save_needed = False
-        for file_path in all_files:
-            entry = self.data.get(file_path.name, {})
+        for data_key in all_data_keys:
+            entry = self.data.get(data_key, {})
             utc_epoch = entry.get("creation_time_utc", 0)
             tz_str = entry.get("local_time_zone") or entry.get("local_time_zone_inferred")
             naive_wall_clock = entry.get("creation_local_naive")
@@ -911,14 +1024,67 @@ class PVAnnotator(QWidget):
             if "creation_time_manual" in entry:
                 ts = parse_creation_value(entry["creation_time_manual"])
                 if ts is not None:
-                    return ts
+                    version_suffix = self.get_version_suffix(p.name)
+                    return (ts, version_suffix)
             if "creation_date_time" in entry:
                 ts = parse_creation_value(entry["creation_date_time"])
                 if ts is not None:
-                    return ts
-            return 9999999999  # Far future for files with no time
+                    version_suffix = self.get_version_suffix(p.name)
+                    return (ts, version_suffix)
+            version_suffix = self.get_version_suffix(p.name)
+            return (9999999999, version_suffix)  # Far future for files with no time
         
-        self.media = sorted(all_files, key=sort_key)
+        # Before sorting, expand media list to include all versioned entries
+        # Build mapping from base filename to all versioned keys in JSON
+        from collections import defaultdict
+        base_to_versions = defaultdict(list)
+        for data_key in self.data.keys():
+            if data_key != "_settings":
+                base = self.get_base_filename(data_key)
+                base_to_versions[base].append(data_key)
+        
+        # Now build the expanded media list with versioned entries
+        expanded_media = []
+        temp_media_to_data_key = {}
+        
+        for file_path in all_files:
+            base = self.get_base_filename(file_path.name)
+            versions = base_to_versions.get(base, [file_path.name])
+            
+            # If no versioned entries exist, use the filename itself
+            if not versions or (len(versions) == 1 and versions[0] == file_path.name):
+                expanded_media.append(file_path)
+                temp_media_to_data_key[len(expanded_media) - 1] = file_path.name
+            else:
+                # Add file once for each versioned entry
+                for version_key in sorted(versions):
+                    expanded_media.append(file_path)
+                    temp_media_to_data_key[len(expanded_media) - 1] = version_key
+        
+        # Sort the expanded media by timestamp and version
+        def sort_key_indexed(idx):
+            data_key = temp_media_to_data_key[idx]
+            entry = self.data.get(data_key, {})
+            if "creation_time_manual" in entry:
+                ts = parse_creation_value(entry["creation_time_manual"])
+                if ts is not None:
+                    version_suffix = self.get_version_suffix(data_key)
+                    return (ts, version_suffix)
+            if "creation_date_time" in entry:
+                ts = parse_creation_value(entry["creation_date_time"])
+                if ts is not None:
+                    version_suffix = self.get_version_suffix(data_key)
+                    return (ts, version_suffix)
+            version_suffix = self.get_version_suffix(data_key)
+            return (9999999999, version_suffix)
+        
+        sorted_indices = sorted(range(len(expanded_media)), key=sort_key_indexed)
+        self.media = [expanded_media[i] for i in sorted_indices]
+        
+        # Build final mapping with sorted indices
+        old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(sorted_indices)}
+        self.media_to_data_key = {old_to_new[i]: temp_media_to_data_key[i] for i in temp_media_to_data_key}
+        
         if start_path and start_path.is_file() and start_path in self.media:
             self.index=self.media.index(start_path)
         # Sort video annotations
@@ -928,9 +1094,10 @@ class PVAnnotator(QWidget):
 
         # Deduplicate and ensure every video has a baseline 0.0 annotation
         needs_save_after_dedup = False
-        for media_path in self.media:
+        for idx, media_path in enumerate(self.media):
             if media_path.suffix.lower() in SUPPORTED_VIDEOS:
-                annotations = self.data.setdefault(media_path.name, {}).setdefault("annotations", [])
+                data_key = self.get_data_key(idx)
+                annotations = self.data.setdefault(data_key, {}).setdefault("annotations", [])
                 # First deduplicate any duplicate timestamps
                 if self.deduplicate_annotations(annotations):
                     needs_save_after_dedup = True
@@ -1046,7 +1213,49 @@ class PVAnnotator(QWidget):
         """Return media entries not marked as skipped (or all media if in show_skipped mode)."""
         if self.show_skipped_mode:
             return self.media
-        return [p for p in self.media if not self.data.get(p.name, {}).get("skip", False)]
+        return [self.media[i] for i in range(len(self.media)) if not self.data.get(self.get_data_key(i), {}).get("skip", False)]
+    
+    def get_data_key(self, index=None):
+        """Get the data dictionary key for a file, accounting for versioning.
+        
+        Args:
+            index: Integer index into self.media, or None (uses current self.index)
+        """
+        if index is None:
+            index = self.index
+        
+        # Check if we have a versioning mapping
+        if hasattr(self, 'media_to_data_key') and index in self.media_to_data_key:
+            return self.media_to_data_key[index]
+        
+        # Fall back to using the filename
+        if index < len(self.media):
+            return self.media[index].name
+        
+        return ""
+
+    def get_base_filename(self, filename):
+        """Strip ##version suffix from filename to get base name."""
+        if "##" in filename:
+            return filename.split("##")[0]
+        return filename
+    
+    def get_version_suffix(self, filename):
+        """Extract ##version suffix from filename, returns empty string if none."""
+        if "##" in filename:
+            return "##" + filename.split("##")[1]
+        return ""
+    
+    def get_next_version_suffix(self, filename):
+        """Get the next version suffix for duplicating. Appends 1 or 2 to existing suffix."""
+        base = self.get_base_filename(filename)
+        current_suffix = self.get_version_suffix(filename)
+        if current_suffix:
+            # Append 1 and 2 to existing suffix
+            return current_suffix + "1", current_suffix + "2"
+        else:
+            # Create new ##1 and ##2
+            return "##1", "##2"
 
     def normalize_special_chars(self, text):
         """Convert special characters to ASCII equivalents for search matching."""
@@ -1060,7 +1269,7 @@ class PVAnnotator(QWidget):
     def search_files(self, direction=0):
         """Search files by content in date/time, filename, location, or annotations.
         Handles show_skipped mode and empty search navigation.
-        direction: 0 = search forward from current, 1 = search right, -1 = search left.
+        direction: 0 = text search (forward from current), 1 = right arrow, -1 = left arrow.
         """
         if not self.media:
             return
@@ -1071,18 +1280,18 @@ class PVAnnotator(QWidget):
         if not search_text and self.show_skipped_mode:
             if direction == 0:
                 return  # Don't navigate on text change when empty
-            
-            # Navigate to next/previous skipped file
-            if direction == 1:
+            elif direction == 1:
+                # Navigate forward to next skipped file
                 start_idx = (self.index + 1) % len(self.media)
                 step = 1
             else:  # direction == -1
+                # Navigate backward to previous skipped file
                 start_idx = (self.index - 1) % len(self.media)
                 step = -1
             
             for i in range(len(self.media)):
                 check_idx = (start_idx + i * step) % len(self.media)
-                if self.data.get(self.media[check_idx].name, {}).get("skip", False):
+                if self.data.get(self.get_data_key(check_idx), {}).get("skip", False):
                     self.index = check_idx
                     self.show_item()
                     self.search_box.setFocus()
@@ -1093,27 +1302,44 @@ class PVAnnotator(QWidget):
         if not search_text:
             return
         
+        # For text changes (direction=0), first check if current file matches
+        # If so, stay on current file without moving
         if direction == 0:
-            # Text changed: search forward from current position
-            start_idx = self.index
-            step = 1
-        elif direction == 1:
-            # Right arrow: search from next file forward
+            if not self.show_skipped_mode and self.data.get(self.get_data_key(self.index), {}).get("skip", False):
+                # Current file is skipped, search forward from next
+                pass
+            else:
+                match_info = self._match_file(self.index, search_text)
+                if match_info:
+                    # Current file matches, stay here
+                    self.search_box.setFocus()
+                    return
+        
+        # Determine search direction and range
+        if direction == 0:
+            # Text changed: current didn't match, search forward from next position with wrap-around
             start_idx = (self.index + 1) % len(self.media)
             step = 1
+            search_range = len(self.media) - 1  # Search all except current (already checked)
+        elif direction == 1:
+            # Right arrow: search from next file forward (with wrap-around)
+            start_idx = (self.index + 1) % len(self.media)
+            step = 1
+            search_range = len(self.media)
         else:  # direction == -1
-            # Left arrow: search from previous file backward
+            # Left arrow: search from previous file backward (with wrap-around)
             start_idx = (self.index - 1) % len(self.media)
             step = -1
+            search_range = len(self.media)
         
-        # Search in circular fashion
-        for i in range(len(self.media)):
+        # Search in specified range
+        for i in range(search_range):
             check_idx = (start_idx + i * step) % len(self.media)
-            file_path = self.media[check_idx]
+            
             # Skip files marked with skip=true ONLY when not in show_skipped mode
-            if not self.show_skipped_mode and self.data.get(file_path.name, {}).get("skip", False):
+            if not self.show_skipped_mode and self.data.get(self.get_data_key(check_idx), {}).get("skip", False):
                 continue
-            match_info = self._match_file(file_path, search_text)
+            match_info = self._match_file(check_idx, search_text)
             if match_info:
                 self.index = check_idx
                 self.show_item()
@@ -1128,11 +1354,13 @@ class PVAnnotator(QWidget):
         
         # No match found - stay on current file
 
-    def _match_file(self, file_path, search_text):
+    def _match_file(self, file_idx, search_text):
         """Check if search_text matches any field in a file's metadata.
         Returns a dict with match info (including annotation_time if matched in annotation), or None.
         """
-        entry = self.data.get(file_path.name, {})
+        file_path = self.media[file_idx]
+        data_key = self.get_data_key(file_idx)
+        entry = self.data.get(data_key, {})
         
         # Check date/time field
         if search_text in entry.get("creation_date_time", "").lower():
@@ -1167,16 +1395,21 @@ class PVAnnotator(QWidget):
 
 
     def update_position_display(self):
-        visible = self.get_visible_media()
-        total = len(visible)
-        if total == 0:
-            text = "0 of 0"
+        # Count non-skipped items up to and including current index
+        if not self.show_skipped_mode:
+            current_visible_index = 0
+            total = 0
+            for idx in range(len(self.media)):
+                data_key = self.get_data_key(idx)
+                is_skipped = self.data.get(data_key, {}).get("skip", False)
+                if not is_skipped:
+                    total += 1
+                    if idx <= self.index:
+                        current_visible_index = total
+            text = f"{current_visible_index} of {total}" if total > 0 else "0 of 0"
         else:
-            try:
-                current_visible_index = visible.index(self.current()) + 1
-            except ValueError:
-                current_visible_index = 1
-            text = f"{current_visible_index} of {total}"
+            # In show skipped mode, show absolute position
+            text = f"{self.index + 1} of {len(self.media)}"
         self.position_box.blockSignals(True)
         self.position_box.setText(text)
         self.position_box.blockSignals(False)
@@ -1235,7 +1468,8 @@ class PVAnnotator(QWidget):
     def extract_and_store_location(self, file_path):
         """Extract GPS coordinates from media file and reverse geocode if available."""
         p = self.current()
-        entry = self.data.setdefault(p.name, {})
+        data_key = self.get_data_key()
+        entry = self.data.setdefault(data_key, {})
         location = entry.setdefault("location", {})
 
         # Skip if we already have automated location data
@@ -1274,14 +1508,16 @@ class PVAnnotator(QWidget):
 
     def show_item(self):
         if not self.media: return
-        p=self.current(); entry=self.data.setdefault(p.name,{"rotation":0,"text":""})
+        p=self.current()
+        data_key = self.get_data_key()
+        entry=self.data.setdefault(data_key,{"rotation":0,"text":""})
 
         # Extract location data if available
         self.extract_and_store_location(p)
 
         # Display the time value used for sorting
-        filename = p.name
-        entry = self.data.get(filename, {})
+        filename = data_key
+        entry = self.data.get(data_key, {})
         
         # Priority: creation_time_manual > creation_date_time
         ts = None
@@ -1305,8 +1541,11 @@ class PVAnnotator(QWidget):
         self.datetime_box.setText(ts)
         self.datetime_box.blockSignals(False)
 
-        # Update filename label (read-only)
+        # Update filename label (read-only) - include version suffix if present
         display_path = self.get_relative_path(p)
+        version_suffix = self.get_version_suffix(data_key)
+        if version_suffix:
+            display_path = display_path + " " + version_suffix
         self.filename_label.blockSignals(True)
         self.filename_label.setText(display_path)
         self.filename_label.setCursorPosition(0)  # Keep cursor at start to show beginning of path
@@ -1321,7 +1560,8 @@ class PVAnnotator(QWidget):
         # Collect all unique locations and find files that have them
         location_files = {}  # location -> list of (index, file_path)
         for idx, file_path in enumerate(self.media):
-            file_entry = self.data.get(file_path.name, {})
+            file_data_key = self.get_data_key(idx)
+            file_entry = self.data.get(file_data_key, {})
             loc = file_entry.get("location", {}).get("manual_text", "") or file_entry.get("location", {}).get("automated_text", "")
             if loc:  # Only track non-empty locations
                 if loc not in location_files:
@@ -1376,19 +1616,83 @@ class PVAnnotator(QWidget):
             for b in [self.play_btn,self.replay_btn,self.add_ann_btn,self.edit_ann_btn,
                       self.remove_ann_btn,self.skip_ann_btn]: b.hide()
             self.rotate_btn.show()
-            self.volume_btn.hide()
+            # Enable Rotate for images unless slideshow is running
+            if not self.slideshow:
+                self.rotate_btn.setEnabled(True)
+                if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                    self.rotate_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+                else:
+                    self.rotate_btn.setStyleSheet("font-weight: bold;")
+            self.duplicate_btn.show()
+            # Enable Duplicate for images unless slideshow is running
+            if not self.slideshow:
+                self.duplicate_btn.setEnabled(True)
+                if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                    self.duplicate_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+                else:
+                    self.duplicate_btn.setStyleSheet("font-weight: bold;")
+            self.crop_btn.show()
+            self.crop_btn.setEnabled(True)  # Enable crop button for images
+            self.volume_btn.show()  # Show volume button for images
+            self.volume_btn.setEnabled(False)  # But disable it (grayed out)
+            self.volume_btn.setStyleSheet("color: gray;")  # Gray out the text
             self.image_label.show()
             rot=entry.get("rotation",0)
             qimg=load_image(p,rot)
             pix=QPixmap.fromImage(qimg)
-            self.image_label.setPixmap(pix.scaled(800,600,Qt.KeepAspectRatio))
+            
+            # Store original pixmap for crop selection
+            self.image_label.original_pixmap = pix
+            
+            # Apply crop if it exists
+            crop_coords = entry.get("crop")
+            if crop_coords:
+                x1, y1, x2, y2 = crop_coords
+                cropped_pix = pix.copy(x1, y1, x2-x1, y2-y1)
+                self.image_label.setPixmap(cropped_pix.scaled(800,600,Qt.KeepAspectRatio))
+                self.crop_btn.setText("Uncrop")
+                self.crop_btn.setStyleSheet("background-color: black; color: white; font-weight: bold;")
+            else:
+                self.image_label.setPixmap(pix.scaled(800,600,Qt.KeepAspectRatio))
+                self.crop_btn.setText("Crop")
+                if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                    self.crop_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+                else:
+                    self.crop_btn.setStyleSheet("font-weight: bold;")
+            
+            # Update crop button click handler for uncrop if needed
+            if crop_coords:
+                self.crop_btn.clicked.disconnect()
+                self.crop_btn.clicked.connect(self.clear_crop)
+            else:
+                self.crop_btn.clicked.disconnect()
+                self.crop_btn.clicked.connect(lambda: self.handle_button_click(self.toggle_crop_mode))
+            
             self.video_player.stop()
         else:
             self.image_label.hide()
             for b in [self.play_btn,self.replay_btn,self.add_ann_btn,self.edit_ann_btn,
                       self.remove_ann_btn,self.skip_ann_btn]: b.show()
-            self.rotate_btn.hide()
+            self.rotate_btn.show()  # Always show Rotate button
+            self.rotate_btn.setEnabled(False)  # But disable it for videos (grayed out)
+            self.rotate_btn.setStyleSheet("color: gray;")  # Gray out the text
+            self.duplicate_btn.show()  # Show Duplicate for videos too
+            # Enable Duplicate for videos unless slideshow is running
+            if not self.slideshow:
+                self.duplicate_btn.setEnabled(True)
+                if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                    self.duplicate_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+                else:
+                    self.duplicate_btn.setStyleSheet("font-weight: bold;")
+            self.crop_btn.show()  # Keep visible but disabled
+            self.crop_btn.setEnabled(False)  # Disable crop button for videos (grayed out)
             self.volume_btn.show()
+            # Enable volume button and restore normal styling for videos
+            self.volume_btn.setEnabled(True)
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                self.volume_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+            else:
+                self.volume_btn.setStyleSheet("font-weight: bold;")
             # Apply stored volume
             volume = entry.get("volume", 100)
             self.audio_output.setVolume(volume / 100.0)
@@ -1489,7 +1793,8 @@ class PVAnnotator(QWidget):
 
     def get_current_video_annotations(self):
         p = self.current()
-        annotations = self.data.setdefault(p.name, {}).setdefault("annotations", [])
+        data_key = self.get_data_key()
+        annotations = self.data.setdefault(data_key, {}).setdefault("annotations", [])
         if self.ensure_zero_annotation(annotations):
             self.save()
         return annotations
@@ -1789,8 +2094,9 @@ class PVAnnotator(QWidget):
         self.set_slider_edit_mode(False)
 
     def handle_button_click(self, func):
-        """Finish editing (if active) before running a button action."""
+        """Finish editing (if active) and cancel crop mode before running a button action."""
         self.finish_edit_mode()
+        self.cancel_crop_mode()  # Cancel crop mode if active
         func()
 
     def toggle_edit_mode(self):
@@ -1837,7 +2143,8 @@ class PVAnnotator(QWidget):
                 return
 
             if p.suffix.lower() in SUPPORTED_IMAGES:
-                self.data.setdefault(p.name, {})["text"] = self.text_box.toPlainText()
+                data_key = self.get_data_key()
+                self.data.setdefault(data_key, {})["text"] = self.text_box.toPlainText()
             else:
                 # If we're editing a specific annotation, keep using that; otherwise pick active
                 if hasattr(self, "editing_annotation"):
@@ -1925,8 +2232,9 @@ class PVAnnotator(QWidget):
     # ---------------- Generic ----------------
     def update_text(self):
         p=self.current()
+        data_key = self.get_data_key()
         if p.suffix.lower() in SUPPORTED_IMAGES:
-            self.data.setdefault(p.name,{})["text"]=self.text_box.toPlainText()
+            self.data.setdefault(data_key,{})["text"]=self.text_box.toPlainText()
         else:
             # For videos, write to the active annotation instead of forcing 0.0
             annotations=self.get_current_video_annotations()
@@ -1944,12 +2252,14 @@ class PVAnnotator(QWidget):
 
     def update_location_text(self,text):
         p=self.current()
-        self.data.setdefault(p.name,{}).setdefault("location",{})["manual_text"]=text
+        data_key = self.get_data_key()
+        self.data.setdefault(data_key,{}).setdefault("location",{})["manual_text"]=text
         self.save()
 
     def update_creation_time(self):
         """Parse and validate the user-edited creation time, immediately update display and resort."""
         p = self.current()
+        data_key = self.get_data_key()
         text = self.datetime_box.text().strip()
 
         timestamp = self.validate_datetime(text)
@@ -1962,7 +2272,7 @@ class PVAnnotator(QWidget):
             self.datetime_box.blockSignals(False)
             return
 
-        entry = self.data.setdefault(p.name, {})
+        entry = self.data.setdefault(data_key, {})
         entry["creation_time_manual"] = text
         self.save()
 
@@ -1970,9 +2280,44 @@ class PVAnnotator(QWidget):
         self.datetime_box.setText(text)
         self.datetime_box.blockSignals(False)
 
-        self.media = sorted(self.media, key=lambda path: self.get_cached_creation_time(path))
-        self.index = self.media.index(p) if p in self.media else 0
+        # Re-sort media with versioned entries
+        def sort_key_indexed(idx):
+            key = self.media_to_data_key.get(idx, self.media[idx].name)
+            entry = self.data.get(key, {})
+            if "creation_time_manual" in entry:
+                ts = parse_creation_value(entry["creation_time_manual"])
+                if ts is not None:
+                    version_suffix = self.get_version_suffix(key)
+                    return (ts, version_suffix)
+            if "creation_date_time" in entry:
+                ts = parse_creation_value(entry["creation_date_time"])
+                if ts is not None:
+                    version_suffix = self.get_version_suffix(key)
+                    return (ts, version_suffix)
+            version_suffix = self.get_version_suffix(key)
+            return (9999999999, version_suffix)
+        
+        # Sort indices
+        sorted_indices = sorted(range(len(self.media)), key=sort_key_indexed)
+        
+        # Rebuild media and mapping in sorted order
+        old_media = self.media[:]
+        old_mapping = self.media_to_data_key.copy()
+        
+        self.media = [old_media[i] for i in sorted_indices]
+        
+        # Create new mapping with sorted indices
+        old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(sorted_indices)}
+        self.media_to_data_key = {old_to_new[old_idx]: old_mapping[old_idx] for old_idx in old_mapping}
+        
+        # Find where current file ended up in the new order
+        for idx, key in self.media_to_data_key.items():
+            if key == data_key:
+                self.index = idx
+                break
+        
         self.update_position_display()
+        self.show_item()
 
     def update_image_time(self):
         """Parse image time input and save to settings."""
@@ -1995,6 +2340,9 @@ class PVAnnotator(QWidget):
                             time_str = str(new_time)
                         self.image_time_input.setText(f"{time_str} {time_text}")
                         self.save()
+                        # If slideshow is running, update the timer for current item
+                        if self.slideshow:
+                            self.restart_slideshow_timer()
                         return
                 except ValueError:
                     pass
@@ -2006,6 +2354,40 @@ class PVAnnotator(QWidget):
         else:
             time_str = str(current_time)
         self.image_time_input.setText(f"{time_str} {time_text}")
+
+    def restart_slideshow_timer(self):
+        """Restart the slideshow timer for the current item with updated delay."""
+        if not self.slideshow:
+            return
+        
+        p = self.current()
+        image_time = self.get_image_time()
+        image_time_ms = int(image_time * 1000)
+        
+        # Stop current timers
+        self.timer.stop()
+        self.text_scroll_timer.stop()
+        
+        if p.suffix.lower() in SUPPORTED_IMAGES:
+            # For images, use word count timing only if delay > 1 second
+            if image_time > 1:
+                duration = max(image_time, len(self.text_box.toPlainText().split()) / 4) * 1000
+                self.timer.start(int(duration))
+                self.start_text_scroll(int(duration))
+            else:
+                # Fast navigation mode: fixed delay time, no text scrolling
+                self.timer.start(image_time_ms)
+        else:
+            # For videos, get effective duration considering skipped segments
+            # But if image_time <= 1 second, use image_time to allow fast navigation
+            if image_time <= 1:
+                self.timer.start(image_time_ms)
+            else:
+                dur_ms = self.get_effective_video_duration_ms(p)
+                if dur_ms and dur_ms > 0:
+                    self.timer.start(dur_ms)
+                else:
+                    self.timer.start(image_time_ms)
 
     # ---------------- Navigation ----------------
     def jump_to_position(self):
@@ -2039,7 +2421,7 @@ class PVAnnotator(QWidget):
         # Skip over any files marked as skip=true ONLY when NOT in show_skipped_mode
         if not self.show_skipped_mode:
             start_index = self.index
-            while self.data.get(self.media[self.index].name, {}).get("skip", False):
+            while self.data.get(self.get_data_key(self.index), {}).get("skip", False):
                 self.index=(self.index+1)%len(self.media)
                 # Prevent infinite loop if all files are skipped
                 if self.index == start_index:
@@ -2051,7 +2433,7 @@ class PVAnnotator(QWidget):
         # Skip over any files marked as skip=true ONLY when NOT in show_skipped_mode
         if not self.show_skipped_mode:
             start_index = self.index
-            while self.data.get(self.media[self.index].name, {}).get("skip", False):
+            while self.data.get(self.get_data_key(self.index), {}).get("skip", False):
                 self.index=(self.index-1)%len(self.media)
                 # Prevent infinite loop if all files are skipped
                 if self.index == start_index:
@@ -2061,7 +2443,8 @@ class PVAnnotator(QWidget):
 
     def skip_item(self):
         p = self.current()
-        entry = self.data.setdefault(p.name, {})
+        data_key = self.get_data_key()
+        entry = self.data.setdefault(data_key, {})
         current_skip = entry.get("skip", False)
         entry["skip"] = not current_skip  # Toggle skip state
         self.save()
@@ -2072,11 +2455,12 @@ class PVAnnotator(QWidget):
 
     def rotate_item(self):
         p=self.current()
+        data_key = self.get_data_key()
         # Only allow rotation for images
         if p.suffix.lower() not in SUPPORTED_IMAGES:
             return
 
-        entry=self.data.setdefault(p.name,{})
+        entry=self.data.setdefault(data_key,{})
         current_rotation=entry.get("rotation",0)
         # Cycle through 0, 270, 180, 90 (clockwise)
         new_rotation=(current_rotation-90)%360
@@ -2088,13 +2472,143 @@ class PVAnnotator(QWidget):
         self.save()
         self.show_item()
 
+    def duplicate_item(self):
+        """Create two copies of the current file's metadata with ##1 and ##2 suffixes."""
+        p = self.current()
+        current_data_key = self.get_data_key()
+        base_filename = self.get_base_filename(current_data_key)
+        
+        # Get the original entry (deep copy before we modify anything)
+        import copy
+        original_entry = copy.deepcopy(self.data.get(current_data_key, {}))
+        
+        # Generate version suffixes
+        suffix1, suffix2 = self.get_next_version_suffix(current_data_key)
+        new_key1 = base_filename + suffix1
+        new_key2 = base_filename + suffix2
+        
+        # Always remove the current entry (whether versioned or not)
+        self.data.pop(current_data_key, None)
+        
+        # Create both new versioned entries from the original
+        self.data[new_key1] = copy.deepcopy(original_entry)
+        self.data[new_key2] = copy.deepcopy(original_entry)
+        
+        self.save()
+        
+        # Now update self.media to include both versions
+        # Insert the same Path object at the current position (for the second version)
+        current_index = self.index
+        self.media.insert(current_index + 1, p)  # Insert second copy after current
+        
+        # Update the mapping: shift all indices after current
+        new_mapping = {}
+        for idx, key in self.media_to_data_key.items():
+            if idx < current_index:
+                new_mapping[idx] = key
+            elif idx == current_index:
+                new_mapping[idx] = new_key1
+                new_mapping[idx + 1] = new_key2
+            else:
+                new_mapping[idx + 1] = key  # Shift by one
+        self.media_to_data_key = new_mapping
+        
+        # Stay on the first version
+        self.index = current_index
+        self.show_item()
+
+
+    def toggle_crop_mode(self):
+        """Toggle crop mode on/off for images."""
+        p=self.current()
+        # Only allow cropping for images
+        if p.suffix.lower() not in SUPPORTED_IMAGES:
+            return
+        
+        # Toggle crop mode
+        self.crop_mode = not self.crop_mode
+        self.image_label.crop_mode = self.crop_mode
+        
+        if self.crop_mode:
+            self.crop_btn.setText("Cropping")
+            self.crop_btn.setStyleSheet("background-color: orange; color: white; font-weight: bold;")
+            self.image_label.setCursor(Qt.CrossCursor)
+        else:
+            entry = self.data.get(p.name, {})
+            if entry.get("crop"):
+                self.crop_btn.setText("Uncrop")
+                self.crop_btn.setStyleSheet("background-color: black; color: white; font-weight: bold;")
+            else:
+                self.crop_btn.setText("Crop")
+                if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                    self.crop_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+                else:
+                    self.crop_btn.setStyleSheet("font-weight: bold;")
+            self.image_label.setCursor(Qt.ArrowCursor)
+    
+    def cancel_crop_mode(self):
+        """Cancel crop mode without saving."""
+        if self.crop_mode:
+            self.crop_mode = False
+            self.image_label.crop_mode = False
+            self.image_label.crop_start = None
+            self.image_label.crop_rect = None
+            self.image_label.update()
+            # Restore button to normal state
+            p = self.current()
+            entry = self.data.get(p.name, {})
+            if entry.get("crop"):
+                self.crop_btn.setText("Uncrop")
+                self.crop_btn.setStyleSheet("background-color: black; color: white; font-weight: bold;")
+            else:
+                self.crop_btn.setText("Crop")
+                if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                    self.crop_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+                else:
+                    self.crop_btn.setStyleSheet("font-weight: bold;")
+            self.image_label.setCursor(Qt.ArrowCursor)
+    
+    def apply_crop(self, crop_coords):
+        """Store crop coordinates and exit crop mode."""
+        p = self.current()
+        data_key = self.get_data_key()
+        entry = self.data.setdefault(data_key, {})
+        
+        # Store crop as (x1, y1, x2, y2)
+        entry["crop"] = crop_coords
+        self.save()
+        
+        # Exit crop mode and refresh display
+        self.crop_mode = False
+        self.image_label.crop_mode = False
+        self.image_label.setCursor(Qt.ArrowCursor)
+        self.crop_btn.setText("Uncrop")
+        self.crop_btn.setStyleSheet("background-color: black; color: white; font-weight: bold;")
+        self.show_item()
+    
+    def clear_crop(self):
+        """Remove crop and restore full image."""
+        p = self.current()
+        data_key = self.get_data_key()
+        entry = self.data.get(data_key, {})
+        if entry and "crop" in entry:
+            del entry["crop"]
+            self.save()
+            self.crop_btn.setText("Crop")
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                self.crop_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+            else:
+                self.crop_btn.setStyleSheet("font-weight: bold;")
+            self.show_item()
+
     def change_volume(self):
         p=self.current()
+        data_key = self.get_data_key()
         # Only allow volume control for videos
         if p.suffix.lower() not in SUPPORTED_VIDEOS:
             return
 
-        entry=self.data.setdefault(p.name,{})
+        entry=self.data.setdefault(data_key,{})
         current_volume=entry.get("volume",100)
         # Cycle through 100, 80, 60, 40, 20, 0, then back to 100
         volume_levels=[100,80,60,40,20,0]
@@ -2119,14 +2633,43 @@ class PVAnnotator(QWidget):
         if p.suffix.lower() in SUPPORTED_VIDEOS:
             self.video_player.stop()
             self.video_player.setSource(QUrl())
+        
         file_parent = p.parent
         trash_dir = file_parent / TRASH_DIR
         trash_dir.mkdir(exist_ok=True)
         shutil.move(str(p), trash_dir / p.name)
-        self.media.remove(p)
+        
+        # Remove this specific version from data and media
+        data_key = self.get_data_key()
+        self.data.pop(data_key, None)
+        
+        # Remove from media by index (not by Path, which would remove the first occurrence)
+        if self.index < len(self.media):
+            self.media.pop(self.index)
+            # Also remove from mapping
+            if hasattr(self, 'media_to_data_key'):
+                self.media_to_data_key.pop(self.index, None)
+                # Shift indices down for all entries after current
+                new_mapping = {}
+                for idx, key in self.media_to_data_key.items():
+                    if idx > self.index:
+                        new_mapping[idx - 1] = key
+                    else:
+                        new_mapping[idx] = key
+                self.media_to_data_key = new_mapping
+        
         self.index = min(self.index, len(self.media) - 1) if self.media else 0
         self.save()
+        
         if self.media:
+            # Skip over any files marked as skip=true ONLY when NOT in show_skipped_mode
+            if not self.show_skipped_mode:
+                start_index = self.index
+                while self.data.get(self.get_data_key(self.index), {}).get("skip", False):
+                    self.index=(self.index+1)%len(self.media)
+                    # Prevent infinite loop if all files are skipped
+                    if self.index == start_index:
+                        break
             self.show_item()
 
     def stop_slideshow_if_running(self):
@@ -2196,6 +2739,17 @@ class PVAnnotator(QWidget):
         self.text_scroll_timer.stop()
         if self.slideshow:
             self.slide_btn.setText("Stop slideshow")
+            self.slide_btn.setStyleSheet("background-color: black; color: white; font-weight: bold;")
+            # Disable Skip and Discard buttons during slideshow
+            self.skip_btn.setEnabled(False)
+            self.skip_btn.setStyleSheet("color: gray;")
+            self.trash_btn.setEnabled(False)
+            self.trash_btn.setStyleSheet("color: gray;")
+            # Disable Rotate and Duplicate buttons during slideshow
+            self.rotate_btn.setEnabled(False)
+            self.rotate_btn.setStyleSheet("color: gray;")
+            self.duplicate_btn.setEnabled(False)
+            self.duplicate_btn.setStyleSheet("color: gray;")
             p=self.current()
             image_time = self.get_image_time()
             image_time_ms = int(image_time * 1000)
@@ -2221,10 +2775,29 @@ class PVAnnotator(QWidget):
                     self.timer.start(image_time_ms)
         else:
             self.slide_btn.setText("Slideshow")
+            # Reset button styling
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                self.slide_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+            else:
+                self.slide_btn.setStyleSheet("font-weight: bold;")
+            # Re-enable Skip and Discard buttons
+            self.skip_btn.setEnabled(True)
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                self.skip_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+            else:
+                self.skip_btn.setStyleSheet("font-weight: bold;")
+            self.trash_btn.setEnabled(True)
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                self.trash_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+            else:
+                self.trash_btn.setStyleSheet("font-weight: bold;")
+            # Restore Rotate and Duplicate button states based on media type
+            # Call show_item() to properly restore button states
             self.timer.stop()
             p=self.current()
             if p.suffix.lower() in SUPPORTED_VIDEOS:
                 self.video_player.pause()
+            self.show_item()
 
     def toggle_show_skipped(self):
         """Toggle show skipped mode on/off."""
