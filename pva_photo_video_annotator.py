@@ -645,6 +645,8 @@ class PVAnnotator(QWidget):
         self.position_box.setAlignment(Qt.AlignCenter)
         self.position_box.editingFinished.connect(self.jump_to_position)
         self.skip_btn=QPushButton("Skip")
+        self.show_skipped_btn=QPushButton("Show Skipped")
+        self.show_skipped_mode = False  # Track whether we're in show skipped mode
         self.trash_btn=QPushButton("Discard")
         self.rotate_btn=QPushButton("Rotate clockwise")
         self.volume_btn=QPushButton("100% volume")
@@ -659,13 +661,14 @@ class PVAnnotator(QWidget):
         # Make button text bold
         bold_font = QFont()
         bold_font.setBold(True)
-        for btn in [self.prev_btn, self.skip_btn, self.trash_btn, self.rotate_btn, self.volume_btn, self.slide_btn, self.next_btn]:
+        for btn in [self.prev_btn, self.skip_btn, self.show_skipped_btn, self.trash_btn, self.rotate_btn, self.volume_btn, self.slide_btn, self.next_btn]:
             btn.setFont(bold_font)
             # Fix for Linux/Mac: ensure button text is visible
             if sys.platform.startswith('linux') or sys.platform == 'darwin':
                 btn.setStyleSheet("QPushButton { color: black; }")
         for b,f in [(self.prev_btn,self.prev_item),(self.next_btn,self.next_item),
-                (self.skip_btn,self.skip_item),(self.trash_btn,self.trash_item),
+                (self.skip_btn,self.skip_item),(self.show_skipped_btn,self.toggle_show_skipped),
+                (self.trash_btn,self.trash_item),
                 (self.rotate_btn,self.rotate_item),(self.volume_btn,self.change_volume),
                 (self.slide_btn,self.toggle_slideshow)]: b.clicked.connect(lambda _, func=f: self.handle_button_click(func))
 
@@ -681,6 +684,13 @@ class PVAnnotator(QWidget):
         # Make dropdown button wider and add padding to prevent text overlap
         self.location_combo.setStyleSheet("QComboBox::drop-down { width: 50px; } QComboBox { padding-right: 55px; }")
         self.location_combo.currentTextChanged.connect(self.update_location_text)
+        # Search controls
+        self.search_left_btn=QPushButton("<"); self.search_left_btn.setMaximumWidth(35)
+        self.search_left_btn.clicked.connect(lambda: self.search_files(direction=-1))
+        self.search_box=QLineEdit(); self.search_box.setPlaceholderText("Search")
+        self.search_box.textChanged.connect(self.search_files)
+        self.search_right_btn=QPushButton(">"); self.search_right_btn.setMaximumWidth(35)
+        self.search_right_btn.clicked.connect(lambda: self.search_files(direction=1))
         self.text_box=QTextEdit(); self.text_box.setFixedHeight(75)
         self.text_box.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
         self._text_change_in_progress = False
@@ -693,10 +703,12 @@ class PVAnnotator(QWidget):
         self.text_scroll_pos = 0
 
         self.video_widget=QVideoWidget()
-        self.video_widget.setStyleSheet("QVideoWidget { background-color: white; }")
-        # Also set palette
+        self.video_widget.setAutoFillBackground(True)
+        self.video_widget.setStyleSheet("QVideoWidget { background-color: white; border: none; }")
+        # Set palette for background
         palette = self.video_widget.palette()
         palette.setColor(self.video_widget.backgroundRole(), QColor("white"))
+        palette.setColor(self.video_widget.foregroundRole(), QColor("white"))
         self.video_widget.setPalette(palette)
         self.video_player=QMediaPlayer()  # Qt6 disables hw accel by default
         self.audio_output=QAudioOutput()
@@ -747,13 +759,19 @@ class PVAnnotator(QWidget):
         layout.addLayout(video_btn_layout)
         button_layout=QHBoxLayout()
         button_layout.setSpacing(2)
-        for b in [self.prev_btn,self.position_box,self.skip_btn,self.trash_btn,self.rotate_btn,self.volume_btn,self.slide_btn]: button_layout.addWidget(b)
+        for b in [self.prev_btn,self.position_box,self.skip_btn,self.show_skipped_btn,self.trash_btn,self.rotate_btn,self.volume_btn,self.slide_btn]: button_layout.addWidget(b)
         button_layout.addWidget(self.image_time_input)
         button_layout.addWidget(self.next_btn)
         layout.addLayout(button_layout)
         meta_layout=QHBoxLayout()
         meta_layout.setSpacing(2)
-        meta_layout.addWidget(self.datetime_box,3); meta_layout.addWidget(self.filename_label,10); meta_layout.addWidget(self.location_combo,7)
+        # Restored datetime (3.0), narrowed filename further to 6.4, search box 1.5, location 6.3
+        meta_layout.addWidget(self.datetime_box, 3.0)
+        meta_layout.addWidget(self.filename_label, 6.4)
+        meta_layout.addWidget(self.search_left_btn, 0.3)
+        meta_layout.addWidget(self.search_box, 1.5)  # 50% width of datetime box
+        meta_layout.addWidget(self.search_right_btn, 0.3)
+        meta_layout.addWidget(self.location_combo, 6.3)
         layout.addLayout(meta_layout)
         layout.addWidget(self.text_box)
 
@@ -1025,8 +1043,128 @@ class PVAnnotator(QWidget):
             return file_path.name
 
     def get_visible_media(self):
-        """Return media entries not marked as skipped."""
+        """Return media entries not marked as skipped (or all media if in show_skipped mode)."""
+        if self.show_skipped_mode:
+            return self.media
         return [p for p in self.media if not self.data.get(p.name, {}).get("skip", False)]
+
+    def normalize_special_chars(self, text):
+        """Convert special characters to ASCII equivalents for search matching."""
+        import unicodedata
+        if not text:
+            return text
+        # Normalize unicode and remove combining marks (accents)
+        nfd = unicodedata.normalize('NFD', text)
+        return ''.join(c for c in nfd if unicodedata.category(c) != 'Mn')
+
+    def search_files(self, direction=0):
+        """Search files by content in date/time, filename, location, or annotations.
+        Handles show_skipped mode and empty search navigation.
+        direction: 0 = search forward from current, 1 = search right, -1 = search left.
+        """
+        if not self.media:
+            return
+        
+        search_text = self.search_box.text().strip().lower()
+        
+        # Special case: empty search in show_skipped mode navigates between skipped files
+        if not search_text and self.show_skipped_mode:
+            if direction == 0:
+                return  # Don't navigate on text change when empty
+            
+            # Navigate to next/previous skipped file
+            if direction == 1:
+                start_idx = (self.index + 1) % len(self.media)
+                step = 1
+            else:  # direction == -1
+                start_idx = (self.index - 1) % len(self.media)
+                step = -1
+            
+            for i in range(len(self.media)):
+                check_idx = (start_idx + i * step) % len(self.media)
+                if self.data.get(self.media[check_idx].name, {}).get("skip", False):
+                    self.index = check_idx
+                    self.show_item()
+                    self.search_box.setFocus()
+                    return
+            return  # No skipped files found
+        
+        # Regular search requires text
+        if not search_text:
+            return
+        
+        if direction == 0:
+            # Text changed: search forward from current position
+            start_idx = self.index
+            step = 1
+        elif direction == 1:
+            # Right arrow: search from next file forward
+            start_idx = (self.index + 1) % len(self.media)
+            step = 1
+        else:  # direction == -1
+            # Left arrow: search from previous file backward
+            start_idx = (self.index - 1) % len(self.media)
+            step = -1
+        
+        # Search in circular fashion
+        for i in range(len(self.media)):
+            check_idx = (start_idx + i * step) % len(self.media)
+            file_path = self.media[check_idx]
+            # Skip files marked with skip=true ONLY when not in show_skipped mode
+            if not self.show_skipped_mode and self.data.get(file_path.name, {}).get("skip", False):
+                continue
+            match_info = self._match_file(file_path, search_text)
+            if match_info:
+                self.index = check_idx
+                self.show_item()
+                # If match was in an annotation, position slider at that annotation's start time
+                if match_info.get("annotation_time") is not None:
+                    ann_time_ms = int(match_info["annotation_time"] * 1000)
+                    self.video_player.setPosition(ann_time_ms)
+                    self.video_slider.setValue(ann_time_ms)
+                # Restore focus to search box after showing item
+                self.search_box.setFocus()
+                return
+        
+        # No match found - stay on current file
+
+    def _match_file(self, file_path, search_text):
+        """Check if search_text matches any field in a file's metadata.
+        Returns a dict with match info (including annotation_time if matched in annotation), or None.
+        """
+        entry = self.data.get(file_path.name, {})
+        
+        # Check date/time field
+        if search_text in entry.get("creation_date_time", "").lower():
+            return {"type": "datetime"}
+        
+        # Check filename
+        if search_text in file_path.name.lower():
+            return {"type": "filename"}
+        
+        # Check location (with special character normalization)
+        location = entry.get("location", {})
+        manual_loc = self.normalize_special_chars(location.get("manual_text", "")).lower()
+        if search_text in manual_loc:
+            return {"type": "location"}
+        automated_loc = self.normalize_special_chars(location.get("automated_text", "")).lower()
+        if search_text in automated_loc:
+            return {"type": "location"}
+        
+        # Check image text annotation
+        if file_path.suffix.lower() in SUPPORTED_IMAGES:
+            if search_text in entry.get("text", "").lower():
+                return {"type": "image_text"}
+        
+        # Check video annotations
+        if file_path.suffix.lower() in SUPPORTED_VIDEOS:
+            annotations = entry.get("annotations", [])
+            for ann in annotations:
+                if search_text in ann.get("text", "").lower():
+                    return {"type": "annotation", "annotation_time": ann.get("time", 0.0)}
+        
+        return None
+
 
     def update_position_display(self):
         visible = self.get_visible_media()
@@ -1266,6 +1404,18 @@ class PVAnnotator(QWidget):
             self.video_player.setSource(QUrl.fromLocalFile(str(p)))
             # Use a single-shot timer to allow the source to load before playing
             QTimer.singleShot(100, self.video_player.play)
+        
+        # Update Skip button text and styling based on whether current file is skipped
+        if entry.get("skip", False):
+            self.skip_btn.setText("Unskip")
+            self.skip_btn.setStyleSheet("background-color: black; color: white; font-weight: bold;")
+        else:
+            self.skip_btn.setText("Skip")
+            # Restore platform-specific default styling
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                self.skip_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+            else:
+                self.skip_btn.setStyleSheet("font-weight: bold;")
 
         # Next/Prev labels stay constant now that position box exists
         self.prev_btn.setText("Previous")
@@ -1886,29 +2036,39 @@ class PVAnnotator(QWidget):
 
     def next_item(self):
         self.index=(self.index+1)%len(self.media)
-        # Skip over any files marked as skip=true
-        start_index = self.index
-        while self.data.get(self.media[self.index].name, {}).get("skip", False):
-            self.index=(self.index+1)%len(self.media)
-            # Prevent infinite loop if all files are skipped
-            if self.index == start_index:
-                break
+        # Skip over any files marked as skip=true ONLY when NOT in show_skipped_mode
+        if not self.show_skipped_mode:
+            start_index = self.index
+            while self.data.get(self.media[self.index].name, {}).get("skip", False):
+                self.index=(self.index+1)%len(self.media)
+                # Prevent infinite loop if all files are skipped
+                if self.index == start_index:
+                    break
         self.show_item()
 
     def prev_item(self):
         self.index=(self.index-1)%len(self.media)
-        # Skip over any files marked as skip=true
-        start_index = self.index
-        while self.data.get(self.media[self.index].name, {}).get("skip", False):
-            self.index=(self.index-1)%len(self.media)
-            # Prevent infinite loop if all files are skipped
-            if self.index == start_index:
-                break
+        # Skip over any files marked as skip=true ONLY when NOT in show_skipped_mode
+        if not self.show_skipped_mode:
+            start_index = self.index
+            while self.data.get(self.media[self.index].name, {}).get("skip", False):
+                self.index=(self.index-1)%len(self.media)
+                # Prevent infinite loop if all files are skipped
+                if self.index == start_index:
+                    break
         if self.slideshow: self.toggle_slideshow()
         self.show_item()
 
     def skip_item(self):
-        self.data[self.current().name]["skip"]=True; self.save(); self.next_item()
+        p = self.current()
+        entry = self.data.setdefault(p.name, {})
+        current_skip = entry.get("skip", False)
+        entry["skip"] = not current_skip  # Toggle skip state
+        self.save()
+        if not current_skip:  # If we just skipped it
+            self.next_item()
+        else:  # If we unskipped it, stay on the same item
+            self.show_item()
 
     def rotate_item(self):
         p=self.current()
@@ -2065,6 +2225,35 @@ class PVAnnotator(QWidget):
             p=self.current()
             if p.suffix.lower() in SUPPORTED_VIDEOS:
                 self.video_player.pause()
+
+    def toggle_show_skipped(self):
+        """Toggle show skipped mode on/off."""
+        self.show_skipped_mode = not self.show_skipped_mode
+        if self.show_skipped_mode:
+            self.show_skipped_btn.setText("Done with Skipped")
+            self.show_skipped_btn.setStyleSheet("background-color: black; color: white; font-weight: bold;")
+            self.search_box.setPlaceholderText("Skipped")
+            self.show_item()  # Refresh to update skip button styling
+        else:
+            self.show_skipped_btn.setText("Show Skipped")
+            # Restore platform-specific default styling
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                self.show_skipped_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+            else:
+                self.show_skipped_btn.setStyleSheet("font-weight: bold;")
+            self.search_box.setPlaceholderText("Search")
+            # If current file is skipped, advance to next unskipped file
+            p = self.current()
+            if self.data.get(p.name, {}).get("skip", False):
+                start_index = self.index
+                while True:
+                    self.index = (self.index + 1) % len(self.media)
+                    if not self.data.get(self.media[self.index].name, {}).get("skip", False):
+                        break
+                    # Prevent infinite loop if all files are skipped
+                    if self.index == start_index:
+                        break
+            self.show_item()  # Refresh to update skip button styling
 
     def advance_slideshow(self):
         self.next_item()
