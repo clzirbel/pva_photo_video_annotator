@@ -27,7 +27,7 @@ except ImportError:
 SUPPORTED_IMAGES = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"}
 SUPPORTED_VIDEOS = {".mp4", ".mov", ".avi", ".mkv", ".flv", ".wmv", ".webm", ".m4v", ".3gp"}
 JSON_NAME = "annotations.json"
-TRASH_DIR = "set_aside"
+TRASH_DIR = "discarded"  # Use "set_aside" if it exists for backward compatibility
 DEFAULT_FONT_SIZE = 14
 DEFAULT_IMAGE_TIME = 5  # seconds per image
 DATETIME_FMT = "%Y/%m/%d %H:%M:%S"
@@ -645,7 +645,7 @@ class PVAnnotator(QWidget):
         self.position_box.setAlignment(Qt.AlignCenter)
         self.position_box.editingFinished.connect(self.jump_to_position)
         self.skip_btn=QPushButton("Skip")
-        self.trash_btn=QPushButton("Set Aside")
+        self.trash_btn=QPushButton("Discard")
         self.rotate_btn=QPushButton("Rotate clockwise")
         self.volume_btn=QPushButton("100% volume")
         self.slide_btn=QPushButton("Slideshow")
@@ -1913,6 +1913,10 @@ class PVAnnotator(QWidget):
 
     def trash_item(self):
         p=self.current()
+        # Stop video playback if it's a video file
+        if p.suffix.lower() in SUPPORTED_VIDEOS:
+            self.video_player.stop()
+            self.video_player.setSource(QUrl())
         file_parent = p.parent
         trash_dir = file_parent / TRASH_DIR
         trash_dir.mkdir(exist_ok=True)
