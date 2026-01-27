@@ -1246,7 +1246,7 @@ class PVAnnotator(QWidget):
             self.image_label.setPixmap(pix.scaled(800,600,Qt.KeepAspectRatio))
             self.video_player.stop()
         else:
-            self.image_label.hide(); self.video_widget.show(); self.video_slider.show()
+            self.image_label.hide()
             for b in [self.play_btn,self.replay_btn,self.add_ann_btn,self.edit_ann_btn,
                       self.remove_ann_btn,self.skip_ann_btn]: b.show()
             self.rotate_btn.hide()
@@ -1255,9 +1255,14 @@ class PVAnnotator(QWidget):
             volume = entry.get("volume", 100)
             self.audio_output.setVolume(volume / 100.0)
             self.volume_btn.setText(f"{volume}% volume")
-            # Full reset: stop any current playback and reload source
+            # Full reset: stop any current playback and clear source before showing widget
             self.video_player.stop()
             self.video_player.setSource(QUrl())
+            # Process events to ensure old video is cleared before showing widget
+            QApplication.processEvents()
+            # Now show the video widget and slider with cleared state
+            self.video_widget.show(); self.video_slider.show()
+            # Set new source and play
             self.video_player.setSource(QUrl.fromLocalFile(str(p)))
             # Use a single-shot timer to allow the source to load before playing
             QTimer.singleShot(100, self.video_player.play)
@@ -1551,7 +1556,7 @@ class PVAnnotator(QWidget):
         self.text_box.clear()
         self.text_box.setFocus()
         cursor = self.text_box.textCursor()
-        cursor.movePosition(cursor.End)
+        cursor.movePosition(QTextCursor.End)
         self.text_box.setTextCursor(cursor)
 
     def edit_annotation(self):
