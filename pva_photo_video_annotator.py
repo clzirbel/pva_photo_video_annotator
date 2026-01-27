@@ -677,6 +677,9 @@ class PVAnnotator(QWidget):
         self.filename_label.setAlignment(Qt.AlignLeft)  # Left-justify text
         self.location_combo=QComboBox(); self.location_combo.setEditable(True)
         self.location_combo.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
+        self.location_combo.setMaxVisibleItems(15)  # Show up to 15 items before scrolling
+        # Make dropdown button wider and add padding to prevent text overlap
+        self.location_combo.setStyleSheet("QComboBox::drop-down { width: 50px; } QComboBox { padding-right: 55px; }")
         self.location_combo.currentTextChanged.connect(self.update_location_text)
         self.text_box=QTextEdit(); self.text_box.setFixedHeight(75)
         self.text_box.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
@@ -1174,16 +1177,50 @@ class PVAnnotator(QWidget):
         # Update position display (1-based, non-skipped)
         self.update_position_display()
 
-        # Dropdown locations
-        manual_locations=list({self.data[f].get("location",{}).get("manual_text","") for f in self.data if "location" in self.data[f]})
-        auto_locations=list({self.data[f].get("location",{}).get("automated_text","") for f in self.data if "location" in self.data[f]})
-        all_locations=list(set([loc for loc in manual_locations + auto_locations if loc]))
+        # Dropdown locations - sorted by distance to current file
         current_loc=entry.get("location",{}).get("manual_text","") or entry.get("location",{}).get("automated_text","")
+        
+        # Collect all unique locations and find files that have them
+        location_files = {}  # location -> list of (index, file_path)
+        for idx, file_path in enumerate(self.media):
+            file_entry = self.data.get(file_path.name, {})
+            loc = file_entry.get("location", {}).get("manual_text", "") or file_entry.get("location", {}).get("automated_text", "")
+            if loc:  # Only track non-empty locations
+                if loc not in location_files:
+                    location_files[loc] = []
+                location_files[loc].append((idx, file_path))
+        
+        # Calculate distance for each location (minimum distance to current file)
+        current_idx = self.index
+        location_distances = {}  # location -> (min_distance, min_index_at_that_distance)
+        for loc, files in location_files.items():
+            min_distance = float('inf')
+            min_index = float('inf')
+            for idx, _ in files:
+                distance = abs(idx - current_idx)
+                if distance < min_distance or (distance == min_distance and idx < min_index):
+                    min_distance = distance
+                    min_index = idx
+            location_distances[loc] = (min_distance, min_index)
+        
+        # Sort locations by distance (descending - most distant first), then by index (ascending)
+        # This puts closest locations near the bottom, with current location at absolute bottom
+        sorted_locations = sorted(location_distances.items(), key=lambda x: (-x[1][0], x[1][1]))
+        
+        # Populate dropdown with sorted locations, then current location at bottom
         self.location_combo.blockSignals(True)
-        self.location_combo.clear(); self.location_combo.addItem(current_loc)
-        for loc in all_locations:
-            if loc!=current_loc: self.location_combo.addItem(loc)
-        self.location_combo.setCurrentText(current_loc)
+        self.location_combo.clear()
+        
+        # Add all other locations (excluding current location to avoid duplicates)
+        for loc, _ in sorted_locations:
+            if loc != current_loc:
+                self.location_combo.addItem(loc)
+        
+        # Always add current location at the bottom (or empty string if no location)
+        self.location_combo.addItem(current_loc if current_loc else "")
+        
+        # Set current index to the last item (current file's location)
+        self.location_combo.setCurrentIndex(self.location_combo.count() - 1)
         self.location_combo.blockSignals(False)
 
         # Text box
