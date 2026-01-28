@@ -33,6 +33,15 @@ DEFAULT_IMAGE_TIME = 5  # seconds per image
 DATETIME_FMT = "%Y/%m/%d %H:%M:%S"
 LEGACY_DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
 
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller."""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = Path(sys._MEIPASS)
+    except Exception:
+        base_path = Path(__file__).parent
+    return base_path / relative_path
+
 def format_creation_timestamp(ts):
     """Format Unix timestamp to display/save format."""
     local_dt = datetime.fromtimestamp(ts)
@@ -718,6 +727,10 @@ class PVAnnotator(QWidget):
         # Silence noisy Qt multimedia/ffmpeg logging in the console
         QLoggingCategory.setFilterRules("qt.multimedia.*=false\nqt.multimedia.ffmpeg*=false")
         self.setWindowTitle("PVA Photo Video Annotator")
+        # Set window icon for taskbar
+        icon_path = resource_path("app_icon.png")
+        if icon_path.exists():
+            self.setWindowIcon(QPixmap(str(icon_path)))
         self.setGeometry(QApplication.primaryScreen().availableGeometry())
         self.showMaximized()
 
@@ -789,6 +802,8 @@ class PVAnnotator(QWidget):
         self.search_right_btn.clicked.connect(lambda: self.search_files(direction=1))
         self.text_box=QTextEdit(); self.text_box.setFixedHeight(75)
         self.text_box.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
+        # Only accept plain text to prevent formatting from pasted content
+        self.text_box.setAcceptRichText(False)
         self._text_change_in_progress = False
 
         self.skip_in_progress = False
@@ -1603,11 +1618,19 @@ class PVAnnotator(QWidget):
 
         # Text box
         if p.suffix.lower() in SUPPORTED_IMAGES:
-            self.text_box.setText(entry.get("text",""))
+            text = entry.get("text","")
+            self.text_box.setText(text)
+            # If slideshow is active, wrap text and prepare for scrolling
+            if self.slideshow:
+                self._prepare_text_for_slideshow(text)
         else:
             annotations = self.get_current_video_annotations()
             ann0 = next((a for a in annotations if a.get("time") == 0.0), None)
-            self.text_box.setText(ann0.get("text", "") if ann0 else "")
+            text = ann0.get("text", "") if ann0 else ""
+            self.text_box.setText(text)
+            # If slideshow is active, wrap text and prepare for scrolling
+            if self.slideshow:
+                self._prepare_text_for_slideshow(text)
 
         self.setFocus()
         # Media display
@@ -1728,7 +1751,7 @@ class PVAnnotator(QWidget):
 
     def show_placeholder_image(self):
         """Display the app icon in the media area before any folder is opened."""
-        icon_path = Path(__file__).parent / "app_icon.png"
+        icon_path = resource_path("app_icon.png")
         self.video_widget.hide(); self.video_slider.hide()
         # Keep the controls visible, just show the placeholder image
         self.image_label.show()
@@ -2128,6 +2151,11 @@ class PVAnnotator(QWidget):
 
     def update_active_annotation_text(self):
         """While typing, pause video and write text into the active annotation."""
+        # CRITICAL: Never save wrapped text during slideshow
+        # Text box contains wrapped version; we only save original after slideshow ends
+        if self.slideshow:
+            return
+        
         if self._text_change_in_progress:
             return
         self._text_change_in_progress = True
@@ -2229,8 +2257,12 @@ class PVAnnotator(QWidget):
         self.save()
 
 
-    # ---------------- Generic ----------------
     def update_text(self):
+        # CRITICAL: Never save wrapped text during slideshow
+        # Text box contains wrapped version; we only save original after slideshow ends
+        if self.slideshow:
+            return
+        
         p=self.current()
         data_key = self.get_data_key()
         if p.suffix.lower() in SUPPORTED_IMAGES:
@@ -2369,23 +2401,60 @@ class PVAnnotator(QWidget):
         self.text_scroll_timer.stop()
         
         if p.suffix.lower() in SUPPORTED_IMAGES:
-            # For images, use word count timing only if delay > 1 second
-            if image_time > 1:
-                duration = max(image_time, len(self.text_box.toPlainText().split()) / 4) * 1000
-                self.timer.start(int(duration))
-                self.start_text_scroll(int(duration))
-            else:
-                # Fast navigation mode: fixed delay time, no text scrolling
+            text = self.text_box.toPlainText()
+            text_lines = text.split('\n')
+            explicit_lines = len(text_lines)  # Number of line breaks + 1
+            char_count = len(text)
+            
+            # Calculate how many display lines are needed
+            # User sees ~160 chars per line at current font size
+            display_lines = max(1, (char_count + 159) // 160)  # Round up
+            num_lines = max(explicit_lines, display_lines)  # Use the larger value
+            
+            if char_count < 150 and num_lines <= 1:
+                # Less than 150 characters and no line breaks: use delay time only
                 self.timer.start(image_time_ms)
+            elif char_count <= 300 and num_lines <= 3:
+                # Up to 300 characters and up to two line breaks: use max(delay, word_count_formula)
+                if image_time > 1:
+                    duration = max(image_time, len(text.split()) / 4) * 1000
+                    self.timer.start(int(duration))
+                else:
+                    self.timer.start(image_time_ms)
+            else:
+                # Beyond that: use scrolling over duration of max(delay_time, char_count/25)
+                # But if image_time <= 1 second, use image_time without scrolling
+                if image_time <= 1:
+                    self.timer.start(image_time_ms)
+                else:
+                    scroll_steps = max(num_lines - 3, 1)
+                    # Total time is max of configured delay or char_count / 25 seconds
+                    total_time = max(image_time, char_count / 25)
+                    total_duration_ms = int(total_time * 1000)
+                    
+                    # Distribute time: 1 second initial + scroll + 1 second final
+                    initial_pause = 1000
+                    final_pause = 1000
+                    scroll_duration = total_duration_ms - initial_pause - final_pause
+                    
+                    # Ensure at least some scroll duration
+                    if scroll_duration < 500:
+                        scroll_duration = 500
+                        initial_pause = max(100, (total_duration_ms - scroll_duration) // 2)
+                        final_pause = total_duration_ms - initial_pause - scroll_duration
+                    
+                    self._text_scroll_complete = False  # Reset flag for this item
+                    self.timer.start(total_duration_ms)
+                    self.start_text_scroll(initial_pause, scroll_duration, scroll_steps)
         else:
-            # For videos, get effective duration considering skipped segments
+            # For videos, get remaining duration from current position
             # But if image_time <= 1 second, use image_time to allow fast navigation
             if image_time <= 1:
                 self.timer.start(image_time_ms)
             else:
-                dur_ms = self.get_effective_video_duration_ms(p)
-                if dur_ms and dur_ms > 0:
-                    self.timer.start(dur_ms)
+                remaining_ms = self.get_remaining_video_duration_ms(p)
+                if remaining_ms and remaining_ms > 0:
+                    self.timer.start(remaining_ms)
                 else:
                     self.timer.start(image_time_ms)
 
@@ -2415,6 +2484,9 @@ class PVAnnotator(QWidget):
         if target_path in self.media:
             self.index = self.media.index(target_path)
             self.show_item()
+            # If slideshow is active, restart timer for new item
+            if self.slideshow:
+                self.restart_slideshow_timer()
 
     def next_item(self):
         self.index=(self.index+1)%len(self.media)
@@ -2427,6 +2499,9 @@ class PVAnnotator(QWidget):
                 if self.index == start_index:
                     break
         self.show_item()
+        # If slideshow is active, restart timer for new item
+        if self.slideshow:
+            self.restart_slideshow_timer()
 
     def prev_item(self):
         self.index=(self.index-1)%len(self.media)
@@ -2672,14 +2747,6 @@ class PVAnnotator(QWidget):
                         break
             self.show_item()
 
-    def stop_slideshow_if_running(self):
-        """Stop slideshow if it's currently running and reset button text."""
-        if self.slideshow:
-            self.slideshow = False
-            self.slide_btn.setText("Slideshow")
-            self.timer.stop()
-            self.text_scroll_timer.stop()
-
     def get_effective_video_duration_ms(self, video_path):
         """Get the effective duration of a video considering skipped segments.
         Returns the end time of the last non-skipped segment in milliseconds.
@@ -2726,13 +2793,66 @@ class PVAnnotator(QWidget):
         # Last annotation is skipped, return when it starts
         return int(last_ann["time"] * 1000)
 
+    def get_remaining_video_duration_ms(self, video_path):
+        """Get remaining video duration from current position to effective end.
+        Returns milliseconds remaining from current playback position."""
+        # Get current position
+        current_pos_ms = self.video_player.position()
+        
+        # Get effective end position
+        effective_end_ms = self.get_effective_video_duration_ms(video_path)
+        
+        if not effective_end_ms or effective_end_ms <= current_pos_ms:
+            return 0
+        
+        return effective_end_ms - current_pos_ms
+
     def stop_slideshow_if_running(self):
         """Stop slideshow if it's currently running and reset button text."""
         if self.slideshow:
             self.slideshow = False
             self.slide_btn.setText("Slideshow")
+            # Reset button styling
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                self.slide_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+            else:
+                self.slide_btn.setStyleSheet("font-weight: bold;")
             self.timer.stop()
             self.text_scroll_timer.stop()
+            # Restore original text (just in case it was modified during scrolling)
+            if hasattr(self, '_original_annotation_text'):
+                self.text_box.blockSignals(True)
+                self.text_box.setText(self._original_annotation_text)
+                self.text_box.blockSignals(False)
+            # CRITICAL: Re-enable text box (was disabled during slideshow to prevent saving)
+            self.text_box.setReadOnly(False)
+            # Re-enable Skip and Discard buttons
+            self.skip_btn.setEnabled(True)
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                self.skip_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+            else:
+                self.skip_btn.setStyleSheet("font-weight: bold;")
+            self.trash_btn.setEnabled(True)
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                self.trash_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+            else:
+                self.trash_btn.setStyleSheet("font-weight: bold;")
+            # Re-enable Rotate and Duplicate buttons if appropriate
+            p = self.current()
+            if p.suffix.lower() in SUPPORTED_IMAGES:
+                self.rotate_btn.setEnabled(True)
+                if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                    self.rotate_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+                else:
+                    self.rotate_btn.setStyleSheet("font-weight: bold;")
+            self.duplicate_btn.setEnabled(True)
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                self.duplicate_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+            else:
+                self.duplicate_btn.setStyleSheet("font-weight: bold;")
+            # Pause video if currently playing one
+            if p.suffix.lower() in SUPPORTED_VIDEOS:
+                self.video_player.pause()
 
     def toggle_slideshow(self):
         self.slideshow=not self.slideshow
@@ -2750,29 +2870,74 @@ class PVAnnotator(QWidget):
             self.rotate_btn.setStyleSheet("color: gray;")
             self.duplicate_btn.setEnabled(False)
             self.duplicate_btn.setStyleSheet("color: gray;")
+            # Disable Crop button during slideshow
+            self.crop_btn.setEnabled(False)
+            self.crop_btn.setStyleSheet("color: gray;")
+            # CRITICAL: Disable text box during slideshow to prevent saving
+            # No gray background - keep the normal appearance, just read-only
+            self.text_box.setReadOnly(True)
             p=self.current()
             image_time = self.get_image_time()
             image_time_ms = int(image_time * 1000)
             if p.suffix.lower() in SUPPORTED_VIDEOS:
-                # For videos, get effective duration considering skipped segments
+                # Start playing the video if not already playing
+                if self.video_player.playbackState() != QMediaPlayer.PlayingState:
+                    self.video_player.play()
+                # For videos, get remaining duration from current position
                 # But if image_time <= 1 second, use image_time to allow fast navigation
                 if image_time <= 1:
                     self.timer.start(image_time_ms)
                 else:
-                    dur_ms = self.get_effective_video_duration_ms(p)
-                    if dur_ms and dur_ms > 0:
-                        self.timer.start(dur_ms)
+                    remaining_ms = self.get_remaining_video_duration_ms(p)
+                    if remaining_ms and remaining_ms > 0:
+                        self.timer.start(remaining_ms)
                     else:
                         self.timer.start(image_time_ms)
             else:
-                # For images, use word count timing only if delay > 1 second
-                if image_time > 1:
-                    duration=max(image_time,len(self.text_box.toPlainText().split())/4)*1000
-                    self.timer.start(int(duration))
-                    self.start_text_scroll(int(duration))
-                else:
-                    # Fast navigation mode: fixed delay time, no text scrolling
+                # For images, calculate delay based on text character count and line breaks
+                text = self.text_box.toPlainText()
+                text_lines = text.split('\n')
+                explicit_lines = len(text_lines)  # Number of line breaks + 1
+                char_count = len(text)
+                
+                if char_count < 150 and explicit_lines <= 1:
+                    # Less than 150 characters and no line breaks: use delay time only
                     self.timer.start(image_time_ms)
+                elif char_count <= 300 and explicit_lines <= 3:
+                    # Up to 300 characters and up to two line breaks: use max(delay, word_count_formula)
+                    if image_time > 1:
+                        duration=max(image_time,len(text.split())/4)*1000
+                        self.timer.start(int(duration))
+                    else:
+                        self.timer.start(image_time_ms)
+                else:
+                    # Beyond that: use scrolling over duration of max(delay_time, char_count/25)
+                    # But if image_time <= 1 second, use image_time without scrolling
+                    if image_time <= 1:
+                        self.timer.start(image_time_ms)
+                    else:
+                        display_lines = max(1, (char_count + 159) // 160)  # Round up using 160 chars per line
+                        num_lines = max(explicit_lines, display_lines)  # Use the larger value
+                        
+                        scroll_steps = max(num_lines - 3, 1)
+                        # Total time is max of configured delay or char_count / 25 seconds
+                        total_time = max(image_time, char_count / 25)
+                        total_duration_ms = int(total_time * 1000)
+                        
+                        # Distribute time: 1 second initial + scroll + 1 second final
+                        initial_pause = 1000
+                        final_pause = 1000
+                        scroll_duration = total_duration_ms - initial_pause - final_pause
+                        
+                        # Ensure at least some scroll duration
+                        if scroll_duration < 500:
+                            scroll_duration = 500
+                            initial_pause = max(100, (total_duration_ms - scroll_duration) // 2)
+                            final_pause = total_duration_ms - initial_pause - scroll_duration
+                        
+                        self._text_scroll_complete = False  # Reset flag for this item
+                        self.timer.start(total_duration_ms)
+                        self.start_text_scroll(initial_pause, scroll_duration, scroll_steps)
         else:
             self.slide_btn.setText("Slideshow")
             # Reset button styling
@@ -2791,13 +2956,29 @@ class PVAnnotator(QWidget):
                 self.trash_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
             else:
                 self.trash_btn.setStyleSheet("font-weight: bold;")
-            # Restore Rotate and Duplicate button states based on media type
-            # Call show_item() to properly restore button states
+            # Re-enable Rotate and Duplicate buttons if appropriate
             self.timer.stop()
             p=self.current()
+            if p.suffix.lower() in SUPPORTED_IMAGES:
+                self.rotate_btn.setEnabled(True)
+                if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                    self.rotate_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+                else:
+                    self.rotate_btn.setStyleSheet("font-weight: bold;")
+            self.duplicate_btn.setEnabled(True)
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                self.duplicate_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+            else:
+                self.duplicate_btn.setStyleSheet("font-weight: bold;")
+            # Re-enable Crop button
+            self.crop_btn.setEnabled(True)
+            if sys.platform.startswith('linux') or sys.platform == 'darwin':
+                self.crop_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
+            else:
+                self.crop_btn.setStyleSheet("font-weight: bold;")
+            # Pause video if currently playing one
             if p.suffix.lower() in SUPPORTED_VIDEOS:
                 self.video_player.pause()
-            self.show_item()
 
     def toggle_show_skipped(self):
         """Toggle show skipped mode on/off."""
@@ -2831,57 +3012,156 @@ class PVAnnotator(QWidget):
     def advance_slideshow(self):
         self.next_item()
         # Now set timer for the newly loaded item
-        p=self.current()
-        image_time = self.get_image_time()
-        image_time_ms = int(image_time * 1000)
-        if p.suffix.lower() in SUPPORTED_IMAGES:
-            # For images, use word count timing only if delay > 1 second
-            if image_time > 1:
-                duration=max(image_time,len(self.text_box.toPlainText().split())/4)*1000
-                self.timer.start(int(duration))
-                self.start_text_scroll(int(duration))
-            else:
-                # Fast navigation mode: fixed delay time, no text scrolling
-                self.timer.start(image_time_ms)
-        else:
-            # For videos, get effective duration considering skipped segments
-            # But if image_time <= 1 second, use image_time to allow fast navigation
-            if image_time <= 1:
-                self.timer.start(image_time_ms)
-            else:
-                dur_ms = self.get_effective_video_duration_ms(p)
-                if dur_ms and dur_ms > 0:
-                    self.timer.start(dur_ms)
-                else:
-                    self.timer.start(image_time_ms)
+        # Use restart_slideshow_timer() to apply consistent timing logic
+        # (which will also handle text wrapping via _prepare_text_for_slideshow)
+        self.restart_slideshow_timer()
 
-    def start_text_scroll(self, duration_ms):
-        """Start scrolling text if it has more than 3 lines during slideshow."""
-        text = self.text_box.toPlainText()
+    def _wrap_text_at_spaces(self, text, max_width=160):
+        """Wrap text at the last space before max_width characters.
+        Returns a list of wrapped lines that break at word boundaries.
+        """
+        wrapped_lines = []
+        remaining = text
+        
+        while remaining:
+            if len(remaining) <= max_width:
+                wrapped_lines.append(remaining)
+                break
+            
+            # Find the last space within max_width
+            chunk = remaining[:max_width]
+            last_space = chunk.rfind(' ')
+            
+            if last_space > 0:
+                # Break at the last space
+                wrapped_lines.append(remaining[:last_space])
+                remaining = remaining[last_space + 1:]  # Skip the space
+            else:
+                # No space found, break at max_width anyway
+                wrapped_lines.append(chunk)
+                remaining = remaining[max_width:]
+        
+        return wrapped_lines
+
+    def _prepare_text_for_slideshow(self, text):
+        """Prepare text for scrolling during slideshow without modifying content.
+        We keep the original text intact and use cursor positioning to scroll."""
+        if not text:
+            return
+        
+        # Save the original text for restoration when slideshow ends
+        self._original_annotation_text = text
+        
+        # Analyze text to see if scrolling is needed
+        text_lines = text.split('\n')
+        explicit_lines = len(text_lines)
+        char_count = len(text)
+        
+        # Calculate display lines (160 chars per line)
+        display_lines = max(1, (char_count + 159) // 160)
+        num_lines = max(explicit_lines, display_lines)
+        
+        # If text needs scrolling (more than 3 lines), set up for scrolling
+        # But keep the text unmodified in the box
+        if num_lines > 3:
+            # Store scroll info: we'll use line-based scrolling
+            self.text_scroll_line_index = 0
+            self.text_scroll_total_lines = num_lines
+
+    def start_text_scroll(self, initial_pause_ms, scroll_duration_ms, scroll_steps):
+        """Start scrolling text during slideshow by moving cursor, not by modifying text.
+        
+        Args:
+            initial_pause_ms: Time to pause before starting scroll
+            scroll_duration_ms: Total time for scrolling
+            scroll_steps: Number of scroll steps
+        """
+        if not self.slideshow:
+            return
+        
+        # Use the original saved text (never modified)
+        if not hasattr(self, '_original_annotation_text'):
+            return
+        
+        text = self._original_annotation_text
+        
+        if not text:
+            return
+        
+        # Split text by newlines to get explicit lines
         lines = text.split('\n')
-        if len(lines) > 3 and self.slideshow:
-            # Calculate scroll interval: divide duration by number of scroll steps
-            scroll_steps = max(len(lines) - 3, 1)
-            scroll_interval = max(100, duration_ms // (scroll_steps + 1))
-            self.text_scroll_pos = 0
-            self.text_scroll_lines = lines
-            self.text_scroll_timer.start(scroll_interval)
+        explicit_lines = len(lines)
+        char_count = len(text)
+        
+        # Calculate display lines needed (160 chars per line at current font size)
+        display_lines = max(1, (char_count + 159) // 160)
+        
+        # Total lines to scroll through
+        num_lines = max(explicit_lines, display_lines)
+        
+        # Only scroll if we have more than 3 lines total
+        if num_lines > 3:
+            # Store scroll parameters for cursor-based scrolling
+            self.text_scroll_line_index = 0
+            self.text_scroll_total_lines = num_lines
+            scroll_interval = max(900, scroll_duration_ms // scroll_steps) if scroll_steps > 0 else 900
+            self.text_scroll_interval = scroll_interval
+            self.text_scroll_steps = scroll_steps
+            
+            # Start with initial pause before scrolling begins
+            QTimer.singleShot(initial_pause_ms, self._start_scrolling_after_delay)
 
     def scroll_annotation_text(self):
-        """Scroll through multi-line text during slideshow."""
-        if not self.slideshow or not hasattr(self, 'text_scroll_lines'):
+        """Scroll through text during slideshow by scrolling the viewport.
+        The original text is never modified - we just scroll the view vertically."""
+        if not self.slideshow or not hasattr(self, 'text_scroll_line_index'):
             self.text_scroll_timer.stop()
             return
 
-        lines = self.text_scroll_lines
-        max_visible_lines = 3
+        # Get the text (original, unmodified)
+        text = self._original_annotation_text
+        if not text:
+            self.text_scroll_timer.stop()
+            return
+        
+        # Calculate display metrics
+        lines = text.split('\n')
+        explicit_lines = len(lines)
+        char_count = len(text)
+        display_lines = max(1, (char_count + 159) // 160)
+        num_lines = max(explicit_lines, display_lines)
+        
+        # Advance to next line if not at end
+        if self.text_scroll_line_index < num_lines - 3:
+            self.text_scroll_line_index += 1
+            
+            # Use vertical scrollbar to scroll the view
+            scrollbar = self.text_box.verticalScrollBar()
+            
+            # Estimate scroll position based on which "line" we're viewing
+            # Each "line" in scrollbar units should advance based on font height
+            # Get font metrics to know line height
+            fm = self.text_box.fontMetrics()
+            line_height = fm.lineSpacing()
+            
+            # Scroll position = current line index * line height
+            # But we want to show lines starting from this index
+            scroll_amount = self.text_scroll_line_index * line_height
+            scrollbar.setValue(scroll_amount)
+        else:
+            # Last line reached, stop scrolling (final pause is handled by main timer)
+            self.text_scroll_timer.stop()
+            self._text_scroll_complete = True
 
-        if self.text_scroll_pos + max_visible_lines < len(lines):
-            self.text_scroll_pos += 1
-            visible_text = '\n'.join(lines[self.text_scroll_pos:self.text_scroll_pos + max_visible_lines])
-            self.text_box.blockSignals(True)
-            self.text_box.setText(visible_text)
-            self.text_box.blockSignals(False)
+    def _text_scroll_complete_handler(self):
+        """Called after text scroll completes and 0.5 second pause is done."""
+        # This just marks completion; the main slideshow timer will handle advancement
+        pass
+
+    def _start_scrolling_after_delay(self):
+        """Helper to start scrolling after the 1-second pause."""
+        if self.slideshow and hasattr(self, 'text_scroll_interval'):
+            self.text_scroll_timer.start(self.text_scroll_interval)
         else:
             self.text_scroll_timer.stop()
 
