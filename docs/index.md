@@ -6,7 +6,11 @@ layout: default
   <a href="#walkthrough-video">Video</a> |
   <a href="#features">Features</a> |
   <a href="#download">Download</a> |
-  <a href="#usage">Usage</a> |
+  <a href="#preparation">Preparation</a> |
+  <a href="#navigation">Navigation</a> |
+  <a href="#annotation">Annotation</a> |
+  <a href="#video">Videos</a> |
+  <a href="#technical">Technical</a> |
   <a href="https://github.com/clzirbel/pva_photo_video_annotator">GitHub</a>
 </nav>
 
@@ -29,13 +33,12 @@ layout: default
 
 # Features <a id="features"></a>
 
-- **Browse Media**: View photos and videos from any folder with a clean, intuitive interface
-- **Subfolder Support**: When opening a folder, you'll be prompted for each subfolder to choose to include or exclude the files from each one
-- **Organize Media**: Quickly hide unwanted files or move them to a "Set Aside" folder
+- **Browse Media**: View photos and videos from a folder on your computer (including any subfolders you select) with a clean, intuitive interface
+- **Organize Media**: Quickly skip unwanted files or move them to a "Set Aside" folder
 - **Image Annotations**: Add text descriptions to photos
 - **Video Annotations**: Add time-stamped text annotations throughout videos
 - **Skip Video Segments**: Mark parts of videos to be automatically skipped during playback
-- **Location Tagging**: Automatically extract GPS coordinates from photos and reverse-geocode them to city/state/country, or add locations manually by typing them or by choosing from a dropdown of values from the folder
+- **Location Tagging**: Automatically extract GPS coordinates from photos and reverse-geocode them to city/state/country, or add locations manually
 - **Volume Control**: Adjust video volume on a per-file basis
 - **Image Rotation**: Rotate photos that have incorrect orientation
 - **Persistent Storage**: All annotations and metadata are saved to a text file in JSON format, using minimal disk space
@@ -43,60 +46,21 @@ layout: default
 
 ---
 
-# Download and Install Executable Files <a id="download"></a>
+# Preparation of Files <a id="preparation"></a>
 
-The easiest way to use PVA is to use the download link below to get the file(s) necessary for your operating system.
+## File and folder organization
 
-**[Go to the latest release]({{ site.github.latest_release.html_url }})**
+Put the images and videos you want into a single folder.
+Your folder of images and videos can have subfolders with additional images and videos.
 
-## Windows
+When you launch PVA, select the folder containing your photos and videos.
+You'll be prompted to confirm which subfolders to include in your annotation project.
+The program will read any existing annotations from an `annotations.json` file in the main folder, or create one if it doesn't exist.
 
-Download:
-- `PVA_Photo_and_Video_Annotator_Windows.exe`
-
-Notes:
-- If Windows warns that the program is unsafe, click **More info → Run anyway**
-- After that, you can right-click an image file, choose **Open with…**, and select the PVA executable to be used once or always
-
----
-
-## macOS
-
-Download **both**:
-- `PVA_Photo_and_Video_Annotator_macOS`
-- `run_PVA_macOS.command`
-
-On the first run:
-1. Save both files in the same folder
-2. Double-click `run_PVA_macOS.command` to set permissions
-3. The script will prepare and launch the app
-
-After that, you can launch `PVA_Photo_and_Video_Annotator_macOS` directly
-
----
-
-## Linux
-
-Download:
-- `PVA_Photo_and_Video_Annotator_Linux`
-
-Make executable if needed:
-```bash
-chmod +x PVA_Photo_and_Video_Annotator_Linux
-```
-
----
-
-# Preparation <a id="preparation"></a>
-
-## File organization
-
-Your folder of images and videos can have subfolders with additional images and videos; the program will first ask you which sub-folders to consider. Generally, it is good to use the program on a folder with a single coherent theme, rather than on multiple loosely related folders.
-
-When you launch the application, select the folder containing your photos and videos. You'll be prompted to confirm which subfolders to include in your annotation project. The program will read any existing annotations from an `annotations.json` file in that folder, or create one if it doesn't exist.
-
+You can add additional files to the folder or subfolder any time you like; PVA will detect them the next time it starts.
 You can manually remove files from the folder, PVA will not complain that they are gone.
-If you rename a file, PVA will not associate the new name with information stored for the old name.
+But if you rename a file, PVA will not associate the new name with information stored for the old name.
+PVA reduces the need to edit image files directly.
 
 ## Supported Image and Video Formats
 
@@ -118,7 +82,7 @@ If you rename a file, PVA will not associate the new name with information store
 
 Files are sorted by creation date, which is determined intelligently:
   - For photos: EXIF datetime is used (the actual date the photo was taken)
-  - For files without EXIF data: The earliest filesystem timestamp is used (handles Google Photos and other downloaded files correctly)
+  - For files without EXIF data: The earliest filesystem timestamp is used (the handles Google Photos and other downloaded files correctly)
   - You can manually edit any creation date by clicking on the date field and entering a new date in `YYYY-MM-DD HH:MM:SS` format
   - Manually editing the creation date is useful, for example, if you splice in a downloaded stock image to be part of the slideshow.
   - No other sorting criterion is supported at this time.
@@ -128,6 +92,15 @@ Files are sorted by creation date, which is determined intelligently:
 - **Next**: Moves to the next media file in the folder. If you're at the last file, it wraps back to the first.
 - **Previous**: Moves to the previous media file. If you're at the first file, it wraps back to the last.
 - **Filename Display**: The filename is shown with its relative path, so files in subfolders appear as `SubfolderName/filename.jpg`
+
+## Tips and Tricks
+
+- **Keyboard Navigation**: Use the arrow keys (→ and ←) to navigate between files quickly
+- **Slideshow for Review**: Use Slideshow mode to review or admire your entire collection at once
+- **Location Dropdowns**: The location dropdown shows all previously used locations, making it easy to tag files consistently
+- **Timestamps**: Hover over the video progress bar to see the exact timestamp at any point
+- **Volume Adjustments**: You can change volume while a video is playing; the change applies immediately
+
 
 ## Skip File
 
@@ -225,6 +198,16 @@ When you navigate to a video:
 4. Use **Replay** to restart from the beginning
 5. Click on the progress slider to jump to a specific time, or hover over it to see timestamps
 
+## Video Volume Control
+
+For videos, use the **Volume** button (showing the current volume level) to adjust playback volume:
+
+- Click to cycle through: 100% → 80% → 60% → 40% → 20% → 0% → back to 100%
+- The volume preference is saved per video file
+- When you return to a video, it plays at the previously saved volume level
+
+Use this to mute videos with too much background noise or to reduce or equalize volume for quieter content.
+
 ## Add Video Annotation
 
 Videos support more sophisticated annotation: you can add multiple text annotations at different time points, and mark segments to be automatically skipped.
@@ -270,17 +253,53 @@ To delete an annotation:
 2. Click **Remove annotation**
 3. The annotation is deleted and the video returns to the previous annotation
 
-## Video Volume Control
+# Download and Install Executable Files <a id="download"></a>
 
-For videos, use the **Volume** button (showing the current volume level) to adjust playback volume:
+The easiest way to use PVA is to use the download link below to get the file(s) necessary for your operating system.
 
-- Click to cycle through: 100% → 80% → 60% → 40% → 20% → 0% → back to 100%
-- The volume preference is saved per video file
-- When you return to a video, it plays at the previously saved volume level
+**[Go to the latest release]({{ site.github.latest_release.html_url }})**
 
-Use this to mute videos with too much background noise or to reduce or equalize volume for quieter content.
+## Windows
 
-# Storage and Formats
+Download:
+- `PVA_Photo_and_Video_Annotator_Windows.exe`
+
+Notes:
+- If Windows warns that the program is unsafe, click **More info → Run anyway**
+- After that, you can right-click an image file, choose **Open with…**, and select the PVA executable to be used once or always
+
+---
+
+## macOS
+
+Download **both**:
+- `PVA_Photo_and_Video_Annotator_macOS`
+- `run_PVA_macOS.command`
+
+On the first run:
+1. Save both files in the same folder
+2. Double-click `run_PVA_macOS.command` to set permissions
+3. The script will prepare and launch the app
+
+After that, you can launch `PVA_Photo_and_Video_Annotator_macOS` directly
+
+---
+
+## Linux
+
+Download:
+- `PVA_Photo_and_Video_Annotator_Linux`
+
+Make executable if needed:
+```bash
+chmod +x PVA_Photo_and_Video_Annotator_Linux
+```
+
+---
+
+# Technical Details
+
+## Storage and Formats
 
 All annotations, metadata, and preferences are stored in a JSON file (`annotations.json`) in your media folder. The JSON format makes it easy to:
 
@@ -291,7 +310,7 @@ All annotations, metadata, and preferences are stored in a JSON file (`annotatio
 
 However, be careful with JSON format because the brackets and commas are very important; it is better to avoid editing the JSON file if at all possible.
 
-# Date and Time Handling
+## Date and Time Handling
 
 The application intelligently determines creation dates for your media files:
 
@@ -302,7 +321,7 @@ The application intelligently determines creation dates for your media files:
 
 The goal is that files are always sorted in the order they were taken, regardless of whether they were downloaded, emailed, or copied to your collection.
 
-# JSON File Entries
+## JSON File Entries
 
 The file annotations.json stores the text you type and the location information that PVA extracts and looks up online.
 
@@ -318,16 +337,8 @@ The application also stores settings in the `_settings` object:
 - `image_time`: Number of seconds each image displays during slideshow (default: 5)
 - `font_size`: Font size for text (default: 14)
 
-# Tips and Tricks
-
-- **Keyboard Navigation**: Use the arrow keys (→ and ←) to navigate between files quickly
-- **Slideshow for Review**: Use Slideshow mode to review or admire your entire collection at once
-- **Location Dropdowns**: The location dropdown shows all previously used locations, making it easy to tag files consistently
-- **Timestamps**: Hover over the video progress bar to see the exact timestamp at any point
-- **Volume Adjustments**: You can change volume while a video is playing; the change applies immediately
-
 ---
 
-# Source Code
+## Source Code
 
 [View on GitHub]({{ site.github.repository_url }})
