@@ -11,7 +11,7 @@ toc: true
 {% include description.md %}
 ---
 
-# Walkthrough video <a id="walkthrough-video"></a>
+# Walkthrough video
 
 <video controls
        style="max-width: 900px; width: 100%;
@@ -22,7 +22,7 @@ toc: true
 
 ---
 
-# Features <a id="features"></a>
+# Features
 
 - **Browse Media**: View photos and videos from a folder on your computer (including any subfolders you select) with a clean, intuitive interface
 - **Organize Media**: Quickly skip unwanted files or move them to a "Set Aside" folder
@@ -37,7 +37,7 @@ toc: true
 
 ---
 
-# Preparation of Files <a id="preparation"></a>
+# Preparation of Files
 
 ## File and folder organization
 
@@ -244,7 +244,7 @@ To delete an annotation:
 2. Click **Remove annotation**
 3. The annotation is deleted and the video returns to the previous annotation
 
-# Download and Install Executable Files <a id="download"></a>
+# Download and Install Executable Files
 
 The easiest way to use PVA is to use the download link below to get the file(s) necessary for your operating system.
 
@@ -329,7 +329,3 @@ The application also stores settings in the `_settings` object:
 - `font_size`: Font size for text (default: 14)
 
 ---
-
-## Source Code
-
-[View on GitHub]({{ site.github.repository_url }})
