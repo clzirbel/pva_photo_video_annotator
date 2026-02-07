@@ -1,14 +1,7 @@
+remote_theme: clzirbel/github-pages-theme
 title: PVA Photo and Video Annotator
 description: Photo and video annotation tool
-theme: minima
-
-plugins:
-  - jekyll-github-metadata
-
-github:
-  is_project_page: true
-
-author: Craig L. Zirbel
+markdown: kramdown
 keywords:
   - video annotation
   - photo annotation

@@ -1,23 +1,14 @@
 ---
 layout: default
+title: PVA Photo and Video Annotator
+toc: true
 ---
 
-<nav>
-  <a href="#walkthrough-video">Video</a> |
-  <a href="#features">Features</a> |
-  <a href="#download">Download</a> |
-  <a href="#preparation">Preparation</a> |
-  <a href="#navigation">Navigation</a> |
-  <a href="#annotation">Annotation</a> |
-  <a href="#video">Videos</a> |
-  <a href="#technical">Technical</a> |
-  <a href="https://github.com/clzirbel/pva_photo_video_annotator">GitHub</a>
-</nav>
+* TOC
+{:toc}
 
 ---
-
 {% include description.md %}
-
 ---
 
 # Walkthrough video <a id="walkthrough-video"></a>
