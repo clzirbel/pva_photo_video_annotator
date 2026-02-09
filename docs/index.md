@@ -7,11 +7,12 @@ toc: true
 * TOC
 {:toc}
 
----
+# PVA Photo and Video Annotator
+
 {% include description.md %}
 ---
 
-# Walkthrough video
+## Walkthrough video
 
 <video controls
        style="max-width: 900px; width: 100%;
@@ -22,10 +23,10 @@ toc: true
 
 ---
 
-# Features
+## Features
 
 - **Browse Media**: View photos and videos from a folder on your computer (including any subfolders you select) with a clean, intuitive interface
-- **Organize Media**: Quickly skip unwanted files or move them to a "Set Aside" folder
+- **Organize Media**: Quickly skip unwanted files or move them to a "Discard" folder
 - **Image Annotations**: Add text descriptions to photos
 - **Video Annotations**: Add time-stamped text annotations throughout videos
 - **Skip Video Segments**: Mark parts of videos to be automatically skipped during playback
@@ -37,9 +38,9 @@ toc: true
 
 ---
 
-# Preparation of Files
+## Preparation of Files
 
-## File and folder organization
+### File and folder organization
 
 Put the images and videos you want into a single folder.
 Your folder of images and videos can have subfolders with additional images and videos.
@@ -53,7 +54,7 @@ You can manually remove files from the folder, PVA will not complain that they a
 But if you rename a file, PVA will not associate the new name with information stored for the old name.
 PVA reduces the need to edit image files directly.
 
-## Supported Image and Video Formats
+### Supported Formats
 
 **Images**: JPG, JPEG, PNG, GIF, BMP, TIFF, TIF, WebP
 
@@ -61,7 +62,7 @@ PVA reduces the need to edit image files directly.
 
 ---
 
-# Navigation
+## Navigation
 
 <img src="assets/navigation.png"
      alt="Navigation buttons"
@@ -69,7 +70,7 @@ PVA reduces the need to edit image files directly.
             border: 1px solid #333;
             box-sizing: border-box;">
 
-## Sort Order
+### Sort Order
 
 Files are sorted by creation date, which is determined intelligently:
   - For photos: EXIF datetime is used (the actual date the photo was taken)
@@ -78,22 +79,18 @@ Files are sorted by creation date, which is determined intelligently:
   - Manually editing the creation date is useful, for example, if you splice in a downloaded stock image to be part of the slideshow.
   - No other sorting criterion is supported at this time.
 
-## Next and Previous Buttons
+### Buttons and Keyboard
 
 - **Next**: Moves to the next media file in the folder. If you're at the last file, it wraps back to the first.
 - **Previous**: Moves to the previous media file. If you're at the first file, it wraps back to the last.
 - **Filename Display**: The filename is shown with its relative path, so files in subfolders appear as `SubfolderName/filename.jpg`
-
-## Tips and Tricks
-
 - **Keyboard Navigation**: Use the arrow keys (→ and ←) to navigate between files quickly
 - **Slideshow for Review**: Use Slideshow mode to review or admire your entire collection at once
 - **Location Dropdowns**: The location dropdown shows all previously used locations, making it easy to tag files consistently
 - **Timestamps**: Hover over the video progress bar to see the exact timestamp at any point
 - **Volume Adjustments**: You can change volume while a video is playing; the change applies immediately
 
-
-## Skip File
+### Skip or Discard File
 
 Click the **Skip** button to hide a media file from view. The file is marked as skipped in the annotations and will be automatically passed over when navigating forward or backward.
 
@@ -102,19 +99,17 @@ Click the **Skip** button to hide a media file from view. The file is marked as 
 - Both Next and Previous buttons will skip over these files
 - Use this for files you want to ignore without deleting or moving them
 
-## Set Aside File
-
-Click the **Set Aside** button to move a file to a `set_aside` subfolder.
+Click the **Discard** button to move a file to a `discard` subfolder.
 This is like deleting a file, but not as severe.
 
-- The file is moved to a `set_aside` folder in the same directory where the file is located
-- For files in the main directory: moved to `main_directory/set_aside/`
-- For files in subfolders: moved to `subfolder/set_aside/` (this keeps files organized by their original location)
+- The file is moved to a `discard` folder in the same directory where the file is located
+- For files in the main directory: moved to `main_directory/discard/`
+- For files in subfolders: moved to `subfolder/discard/` (this keeps files organized by their original location)
 - The file is physically moved (not just marked as skipped)
-- You can recover files by moving them back out of the set_aside folder manually
-- Use this when you're sure you don't want a file and you may want to delete all of the files in the set_aside folder to save space
+- You can recover files by moving them back out of the discard folder manually
+- Use this when you're sure you don't want a file and you may want to delete all of the files in the discard folder to save space
 
-## Slideshow
+### Slideshow
 
 Click the **Slideshow** button to automatically cycle through your media files:
 
@@ -124,9 +119,9 @@ Click the **Slideshow** button to automatically cycle through your media files:
 - **Adjust Timing**: Use the editable text field next to the Slideshow button to change how many seconds each image displays. Type a new number (e.g., "10 seconds") and press Enter. The setting is saved and will be used for all future slideshows.
 - **Quick View**: Use a delay time of 1 second or less to have PVA quickly advance through images and videos; this can help you understand the organization.
 
-# Image annotation and display modifications
+## Image annotation and display modifications
 
-## Image Annotations
+### Image Annotations
 
 For images, you can add and edit a text description:
 
@@ -136,7 +131,7 @@ For images, you can add and edit a text description:
 
 The text is automatically saved to the JSON file under the `text` field for that image.
 
-## Rotate Image
+### Rotate Image
 
 Click the **Rotate** button (only available for images) to rotate a photo clockwise:
 
@@ -147,11 +142,11 @@ Click the **Rotate** button (only available for images) to rotate a photo clockw
 
 The rotation preference is saved for the image in the JSON file and will be remembered the next time you view it.
 
-## Location Information
+### Location Information
 
 The application automatically extracts GPS coordinates from photo metadata using EXIF data. When coordinates are found, it performs a reverse geocoding lookup using OpenStreetMap's Nominatim service to determine the city, state, and country.
 
-### Automatic Location Detection
+#### Automatic Location Detection
 
 When you view a photo with GPS data:
 
@@ -160,7 +155,7 @@ When you view a photo with GPS data:
 3. The location is stored as `location.automated_text` in the JSON file
 4. The location appears in the location dropdown
 
-### Manual Location Entry
+#### Manual Location Entry
 
 You can also manually set or override the location:
 
@@ -171,7 +166,7 @@ You can also manually set or override the location:
 
 The dropdown shows all unique locations (both manual and automated) across all files in your collection, making it easy to maintain consistency.
 
-# Video Display and Annotations
+## Video Display and Annotations
 
 <img src="assets/video.png"
      alt="Video display and annotation"
@@ -179,7 +174,7 @@ The dropdown shows all unique locations (both manual and automated) across all f
             border: 1px solid #333;
             box-sizing: border-box;">
 
-## Playing Videos
+### Playing Videos
 
 When you navigate to a video:
 
@@ -189,7 +184,7 @@ When you navigate to a video:
 4. Use **Replay** to restart from the beginning
 5. Click on the progress slider to jump to a specific time, or hover over it to see timestamps
 
-## Video Volume Control
+### Video Volume Control
 
 For videos, use the **Volume** button (showing the current volume level) to adjust playback volume:
 
@@ -199,7 +194,7 @@ For videos, use the **Volume** button (showing the current volume level) to adju
 
 Use this to mute videos with too much background noise or to reduce or equalize volume for quieter content.
 
-## Add Video Annotation
+### Add Video Annotation
 
 Videos support more sophisticated annotation: you can add multiple text annotations at different time points, and mark segments to be automatically skipped.
 
@@ -213,7 +208,7 @@ To add a text annotation at a specific time:
 
 You can add as many annotations as you want throughout the video, each with its own timestamp.
 
-## Edit Video Annotation
+### Edit Video Annotation
 
 To edit an existing annotation:
 
@@ -224,7 +219,7 @@ To edit an existing annotation:
 
 The text is updated while the timestamp remains unchanged.
 
-### Skipping Video Segment
+#### Skipping Video Segment
 
 To mark a segment of the video to be automatically skipped during playback:
 
@@ -236,7 +231,7 @@ To mark a segment of the video to be automatically skipped during playback:
 
 This is useful for removing unwanted sections (background noise, false starts, etc.) without deleting the original video file.  You can adjust the slider into a skipped segment to remove the skip annotation, if desired, or to start a new annotation where the video should start playing again.
 
-## Removing Video Annotation
+### Removing Video Annotation
 
 To delete an annotation:
 
@@ -244,13 +239,13 @@ To delete an annotation:
 2. Click **Remove annotation**
 3. The annotation is deleted and the video returns to the previous annotation
 
-# Download and Install Executable Files
+## Download and Install Executable Files
 
 The easiest way to use PVA is to use the download link below to get the file(s) necessary for your operating system.
 
 **[Go to the latest release]({{ site.github.latest_release.html_url }})**
 
-## Windows
+### Windows
 
 Download:
 - `PVA_Photo_and_Video_Annotator_Windows.exe`
@@ -261,7 +256,7 @@ Notes:
 
 ---
 
-## macOS
+### macOS
 
 Download **both**:
 - `PVA_Photo_and_Video_Annotator_macOS`
@@ -276,7 +271,7 @@ After that, you can launch `PVA_Photo_and_Video_Annotator_macOS` directly
 
 ---
 
-## Linux
+### Linux
 
 Download:
 - `PVA_Photo_and_Video_Annotator_Linux`
@@ -288,9 +283,9 @@ chmod +x PVA_Photo_and_Video_Annotator_Linux
 
 ---
 
-# Technical Details
+## Technical Details
 
-## Storage and Formats
+### Storage and Formats
 
 All annotations, metadata, and preferences are stored in a JSON file (`annotations.json`) in your media folder. The JSON format makes it easy to:
 
@@ -301,7 +296,7 @@ All annotations, metadata, and preferences are stored in a JSON file (`annotatio
 
 However, be careful with JSON format because the brackets and commas are very important; it is better to avoid editing the JSON file if at all possible.
 
-## Date and Time Handling
+### Date and Time Handling
 
 The application intelligently determines creation dates for your media files:
 
@@ -312,7 +307,7 @@ The application intelligently determines creation dates for your media files:
 
 The goal is that files are always sorted in the order they were taken, regardless of whether they were downloaded, emailed, or copied to your collection.
 
-## JSON File Entries
+### JSON File Entries
 
 The file annotations.json stores the text you type and the location information that PVA extracts and looks up online.
 
