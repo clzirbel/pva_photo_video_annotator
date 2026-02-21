@@ -1,7 +1,7 @@
 {
   "_settings": {
     "font_size": 14,
-    "image_time": 5.0
+    "image_time": 1.0
   },
   "PXL_20251015_220836835.jpg": {
     "rotation": 90,
@@ -13,7 +13,9 @@
       },
       "automated_text": "Oakland, California, United States"
     },
-    "creation_time": "2025/10/15 15:08:36"
+    "creation_time_utc": 1760566116.0,
+    "creation_local_naive": "2025/10/15 15:08:36",
+    "creation_date_time": "2025/10/15 15:08:36"
   },
   "PXL_20251018_223427037.jpg": {
     "rotation": 0,
@@ -25,7 +27,9 @@
       },
       "automated_text": "San Francisco, California, United States"
     },
-    "creation_time": "2025/10/18 15:34:27"
+    "creation_time_utc": 1760826867.0,
+    "creation_local_naive": "2025/10/18 15:34:27",
+    "creation_date_time": "2025/10/18 15:34:27"
   },
   "PXL_20250623_004528789.jpg": {
     "rotation": 0,
@@ -37,7 +41,9 @@
       },
       "automated_text": "Pacific Grove, California, United States"
     },
-    "creation_time": "2025/06/22 17:45:28"
+    "creation_time_utc": 1750639528.0,
+    "creation_local_naive": "2025/06/22 17:45:28",
+    "creation_date_time": "2025/06/22 17:45:28"
   },
   "PXL_20250601_222146140.jpg": {
     "rotation": 0,
@@ -49,7 +55,9 @@
       },
       "automated_text": "California, United States"
     },
-    "creation_time": "2025/06/01 15:21:46"
+    "creation_time_utc": 1748816506.0,
+    "creation_local_naive": "2025/06/01 15:21:46",
+    "creation_date_time": "2025/06/01 15:21:46"
   },
   "PXL_20230728_175225112.mp4": {
     "text": "",
@@ -90,7 +98,9 @@
       }
     ],
     "location": {},
-    "creation_time": "2023/07/28 10:53:15"
+    "creation_time_utc": 1690566795,
+    "creation_local_naive": "2023/07/28 10:53:15",
+    "creation_date_time": "2023/07/28 10:53:15"
   },
   "France": {
     "use": true
@@ -105,7 +115,9 @@
       },
       "automated_text": "Marseille, Provence-Alpes-C\u00f4te d'Azur, France"
     },
-    "creation_time": "2023/03/22 14:18:09"
+    "creation_time_utc": 1679519889.0,
+    "creation_local_naive": "2023/03/22 14:18:09",
+    "creation_date_time": "2023/03/22 14:18:09"
   },
   "PXL_20230324_155705728.jpg": {
     "rotation": 0,
@@ -117,7 +129,9 @@
       },
       "automated_text": "Marseille, Provence-Alpes-C\u00f4te d'Azur, France"
     },
-    "creation_time": "2023/03/24 16:57:05"
+    "creation_time_utc": 1679702225.0,
+    "creation_local_naive": "2023/03/24 16:57:05",
+    "creation_date_time": "2023/03/24 16:57:05"
   },
   "PXL_20230328_135543810.jpg": {
     "rotation": 0,
@@ -129,7 +143,9 @@
       },
       "automated_text": "Riquewihr, Grand Est, France"
     },
-    "creation_time": "2023/03/28 15:55:43"
+    "creation_time_utc": 1680044143.0,
+    "creation_local_naive": "2023/03/28 15:55:43",
+    "creation_date_time": "2023/03/28 15:55:43"
   },
   "PXL_20230331_090338930.jpg": {
     "text": "",
@@ -140,7 +156,9 @@
       },
       "automated_text": "Strasbourg, Grand Est, France"
     },
-    "creation_time": "2023/03/31 11:03:38"
+    "creation_time_utc": 1680285818.0,
+    "creation_local_naive": "2023/03/31 11:03:38",
+    "creation_date_time": "2023/03/31 11:03:38"
   },
   "image_to_set_aside.png": {
     "rotation": 0,
@@ -150,43 +168,64 @@
   "image_to_set_aside_2.png": {
     "rotation": 0,
     "text": "",
-    "location": {}
+    "location": {},
+    "creation_time_utc": 1767201431.3970716,
+    "creation_local_naive": "2025/12/31 09:17:11",
+    "creation_date_time": "2025/12/31 09:17:11"
   },
   "image_to_skip.gif": {
     "rotation": 0,
     "text": "",
     "location": {},
     "skip": true,
-    "creation_time": "2025/12/31 09:18:41"
+    "creation_time_utc": 1767201521.0208082,
+    "creation_local_naive": "2025/12/31 09:18:41",
+    "creation_date_time": "2025/12/31 09:18:41"
   },
   "image_to_skip_2.gif": {
     "rotation": 0,
     "text": "",
     "location": {},
     "skip": true,
-    "creation_time": "2025/12/31 09:18:41"
+    "creation_time_utc": 1767201521.133959,
+    "creation_local_naive": "2025/12/31 09:18:41",
+    "creation_date_time": "2025/12/31 09:18:41"
   },
   "image_from_paint.gif": {
     "rotation": 0,
     "text": "",
-    "location": {},
-    "creation_time": "2025/12/31 09:27:37"
+    "location": {}
   },
   "screen_grab.png": {
     "rotation": 0,
     "text": "",
     "location": {},
-    "creation_time": "2025/12/31 09:29:35"
+    "creation_time_utc": 1767202175.7916822,
+    "creation_local_naive": "2025/12/31 09:29:35",
+    "creation_date_time": "2025/12/31 09:29:35"
   },
   "image_from_paint_with_very_very_very_very_super_crazy_long_filename_that_does_not_wrap.gif": {
     "location": {},
-    "creation_time": "2025/12/31 09:27:38",
-    "text": ""
+    "text": "",
+    "creation_time_utc": 1767202058.0524397,
+    "creation_local_naive": "2025/12/31 09:27:38",
+    "creation_date_time": "2025/12/31 09:27:38"
   },
   "introduction_image.gif": {
-    "creation_time": "2026/01/03 13:07:12",
     "location": {},
     "text": "",
-    "creation_time_manual": "2022/01/03 13:07:12"
+    "creation_time_manual": "2022/01/03 13:07:12",
+    "creation_time_utc": 1767474432.6802127,
+    "creation_local_naive": "2026/01/03 13:07:12",
+    "creation_date_time": "2026/01/03 13:07:12"
+  },
+  "set_aside": {
+    "use": false
+  },
+  "France\\set_aside": {
+    "use": false
+  },
+  "pva_data": {
+    "use": false
   }
 }
