@@ -27,6 +27,7 @@ except ImportError:
 SUPPORTED_IMAGES = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"}
 SUPPORTED_VIDEOS = {".mp4", ".mov", ".avi", ".mkv", ".flv", ".wmv", ".webm", ".m4v", ".3gp"}
 JSON_NAME = "annotations.json"
+PVA_DATA_DIR = "pva_data"  # Directory to store annotations and backups
 TRASH_DIR = "discarded"  # Use "set_aside" if it exists for backward compatibility
 DEFAULT_FONT_SIZE = 14
 DEFAULT_IMAGE_TIME = 5  # seconds per image
@@ -632,7 +633,7 @@ class TimestampSlider(QSlider):
 class CropImageLabel(QLabel):
     """Custom label for handling crop selection on images."""
     crop_selected = None  # Signal-like attribute, will be set by parent
-    
+
     def __init__(self, alignment=None, parent=None):
         super().__init__(parent)
         if alignment:
@@ -642,24 +643,24 @@ class CropImageLabel(QLabel):
         self.crop_rect = None
         self.original_pixmap = None
         self.setMouseTracking(True)
-    
+
     def mousePressEvent(self, event):
         if self.crop_mode and self.original_pixmap:
             self.crop_start = event.position()
             self.crop_rect = None
             self.update()
-    
+
     def mouseMoveEvent(self, event):
         if self.crop_mode and self.crop_start and self.original_pixmap:
             # Create rectangle from start to current position
             self.crop_rect = (self.crop_start, event.position())
             self.update()
-    
+
     def mouseReleaseEvent(self, event):
         if self.crop_mode and self.crop_start and self.original_pixmap:
             # Finalize crop
             end_pos = event.position()
-            
+
             # Check if a meaningful rectangle was drawn
             if abs(end_pos.x() - self.crop_start.x()) > 5 and abs(end_pos.y() - self.crop_start.y()) > 5:
                 if callable(self.crop_selected):
@@ -670,51 +671,51 @@ class CropImageLabel(QLabel):
                         label_rect = self.contentsRect()
                         pix_width = pixmap.width()
                         pix_height = pixmap.height()
-                        
+
                         # Calculate the centered position of the pixmap in the label
                         pix_x = (label_rect.width() - pix_width) / 2
                         pix_y = (label_rect.height() - pix_height) / 2
-                        
+
                         # Convert label coordinates to image coordinates
                         x1 = int((self.crop_start.x() - pix_x) * self.original_pixmap.width() / pix_width)
                         y1 = int((self.crop_start.y() - pix_y) * self.original_pixmap.height() / pix_height)
                         x2 = int((end_pos.x() - pix_x) * self.original_pixmap.width() / pix_width)
                         y2 = int((end_pos.y() - pix_y) * self.original_pixmap.height() / pix_height)
-                        
+
                         # Clamp to image bounds
                         x1 = max(0, min(x1, self.original_pixmap.width()))
                         y1 = max(0, min(y1, self.original_pixmap.height()))
                         x2 = max(0, min(x2, self.original_pixmap.width()))
                         y2 = max(0, min(y2, self.original_pixmap.height()))
-                        
+
                         # Ensure coordinates are in order
                         crop_coords = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
                         self.crop_selected(crop_coords)
-            
+
             self.crop_start = None
             self.crop_rect = None
             self.update()
-    
+
     def paintEvent(self, event):
         super().paintEvent(event)
         # Draw crop selection rectangle
         if self.crop_mode and self.crop_rect:
             painter = QPainter(self)
             painter.setRenderHint(QPainter.Antialiasing)
-            
+
             # Calculate width and height properly
             x1 = min(self.crop_rect[0].x(), self.crop_rect[1].x())
             y1 = min(self.crop_rect[0].y(), self.crop_rect[1].y())
             x2 = max(self.crop_rect[0].x(), self.crop_rect[1].x())
             y2 = max(self.crop_rect[0].y(), self.crop_rect[1].y())
-            
+
             width = x2 - x1
             height = y2 - y1
-            
+
             # Draw semi-transparent blue rectangle
             color = QColor(0, 0, 255, 50)
             painter.fillRect(int(x1), int(y1), int(width), int(height), color)
-            
+
             # Draw blue border
             painter.setPen(QPen(QColor(0, 0, 255), 2))
             painter.drawRect(int(x1), int(y1), int(width), int(height))
@@ -918,7 +919,18 @@ class PVAnnotator(QWidget):
             if not d: sys.exit()
             self.dir=Path(d)
         self.trash=self.dir/TRASH_DIR
-        self.json_path=self.dir/JSON_NAME
+        
+        # Set up pva_data directory and handle migration
+        self.pva_data_dir = self.dir / PVA_DATA_DIR
+        self.pva_data_dir.mkdir(exist_ok=True)
+        self.json_path = self.pva_data_dir / JSON_NAME
+        
+        # Migrate annotations.json from root to pva_data if needed
+        old_json_path = self.dir / JSON_NAME
+        if old_json_path.exists() and not self.json_path.exists():
+            # Move the old file to the new location
+            shutil.move(str(old_json_path), str(self.json_path))
+        
         if self.json_path.exists():
             self.data=json.loads(self.json_path.read_text())
         else: self.data={"_settings":{"font_size":DEFAULT_FONT_SIZE,"image_time":DEFAULT_IMAGE_TIME}}
@@ -935,7 +947,7 @@ class PVAnnotator(QWidget):
         QApplication.processEvents()
         # Get all media files
         all_files = list(self.get_all_media_files())
-        
+
         # Build a map of base filenames to their versioned keys
         from collections import defaultdict
         base_to_versions = defaultdict(list)
@@ -943,7 +955,7 @@ class PVAnnotator(QWidget):
             if data_key != "_settings":
                 base = self.get_base_filename(data_key)
                 base_to_versions[base].append(data_key)
-        
+
         # Step 1: Ensure all files have creation_time_utc and local_time_zone (if available)
         needs_save = False
         for file_path in all_files:
@@ -951,7 +963,7 @@ class PVAnnotator(QWidget):
             # Check if this file has versioned entries - if so, skip creating a base entry
             versions = base_to_versions.get(base, [])
             has_versioned_entries = any("##" in v for v in versions)
-            
+
             # Only process if: no versions exist, OR this exact filename exists in data
             if not has_versioned_entries:
                 if file_path.name not in self.data or "creation_time_utc" not in self.data.get(file_path.name, {}):
@@ -959,12 +971,12 @@ class PVAnnotator(QWidget):
                     needs_save = True
         if needs_save:
             self.save()
-        
+
         # Step 2: Sort all data entries by creation_time_utc for timezone inference
         # Use all keys (including versioned ones), not just physical files
         all_data_keys = [k for k in self.data.keys() if k != "_settings"]
         sorted_keys = sorted(all_data_keys, key=lambda k: self.data.get(k, {}).get("creation_time_utc", 9999999999))
-        
+
         # Step 3: Infer timezones for files without them
         last_known_tz = None
         for data_key in sorted_keys:
@@ -974,10 +986,10 @@ class PVAnnotator(QWidget):
             elif last_known_tz and "local_time_zone_inferred" not in entry:
                 entry["local_time_zone_inferred"] = last_known_tz
                 needs_save = True
-        
+
         if needs_save:
             self.save()
-        
+
         # Step 4: Compute creation_date_time using actual or inferred timezone.
         # If we only have a wall-clock (no tz), keep that wall-clock untouched.
         save_needed = False
@@ -1028,10 +1040,10 @@ class PVAnnotator(QWidget):
             if utc_epoch:
                 entry["creation_date_time"] = format_creation_timestamp(utc_epoch)
                 save_needed = True
-        
+
         if save_needed:
             self.save()
-        
+
         # Step 5: Sort using creation_date_time (or creation_time_manual if present)
         def sort_key(p):
             entry = self.data.get(p.name, {})
@@ -1048,7 +1060,7 @@ class PVAnnotator(QWidget):
                     return (ts, version_suffix)
             version_suffix = self.get_version_suffix(p.name)
             return (9999999999, version_suffix)  # Far future for files with no time
-        
+
         # Before sorting, expand media list to include all versioned entries
         # Build mapping from base filename to all versioned keys in JSON
         from collections import defaultdict
@@ -1057,15 +1069,15 @@ class PVAnnotator(QWidget):
             if data_key != "_settings":
                 base = self.get_base_filename(data_key)
                 base_to_versions[base].append(data_key)
-        
+
         # Now build the expanded media list with versioned entries
         expanded_media = []
         temp_media_to_data_key = {}
-        
+
         for file_path in all_files:
             base = self.get_base_filename(file_path.name)
             versions = base_to_versions.get(base, [file_path.name])
-            
+
             # If no versioned entries exist, use the filename itself
             if not versions or (len(versions) == 1 and versions[0] == file_path.name):
                 expanded_media.append(file_path)
@@ -1075,7 +1087,7 @@ class PVAnnotator(QWidget):
                 for version_key in sorted(versions):
                     expanded_media.append(file_path)
                     temp_media_to_data_key[len(expanded_media) - 1] = version_key
-        
+
         # Sort the expanded media by timestamp and version
         def sort_key_indexed(idx):
             data_key = temp_media_to_data_key[idx]
@@ -1092,14 +1104,14 @@ class PVAnnotator(QWidget):
                     return (ts, version_suffix)
             version_suffix = self.get_version_suffix(data_key)
             return (9999999999, version_suffix)
-        
+
         sorted_indices = sorted(range(len(expanded_media)), key=sort_key_indexed)
         self.media = [expanded_media[i] for i in sorted_indices]
-        
+
         # Build final mapping with sorted indices
         old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(sorted_indices)}
         self.media_to_data_key = {old_to_new[i]: temp_media_to_data_key[i] for i in temp_media_to_data_key}
-        
+
         if start_path and start_path.is_file() and start_path in self.media:
             self.index=self.media.index(start_path)
         # Sort video annotations
@@ -1119,10 +1131,10 @@ class PVAnnotator(QWidget):
                 # Then ensure we have a 0.0 annotation
                 if self.ensure_zero_annotation(annotations):
                     needs_save_after_dedup = True
-        
+
         if needs_save_after_dedup:
             self.save()
-        
+
         # Update image time display
         image_time = self.get_image_time()
         time_text = "second" if image_time == 1 else "seconds"
@@ -1229,24 +1241,24 @@ class PVAnnotator(QWidget):
         if self.show_skipped_mode:
             return self.media
         return [self.media[i] for i in range(len(self.media)) if not self.data.get(self.get_data_key(i), {}).get("skip", False)]
-    
+
     def get_data_key(self, index=None):
         """Get the data dictionary key for a file, accounting for versioning.
-        
+
         Args:
             index: Integer index into self.media, or None (uses current self.index)
         """
         if index is None:
             index = self.index
-        
+
         # Check if we have a versioning mapping
         if hasattr(self, 'media_to_data_key') and index in self.media_to_data_key:
             return self.media_to_data_key[index]
-        
+
         # Fall back to using the filename
         if index < len(self.media):
             return self.media[index].name
-        
+
         return ""
 
     def get_base_filename(self, filename):
@@ -1254,13 +1266,13 @@ class PVAnnotator(QWidget):
         if "##" in filename:
             return filename.split("##")[0]
         return filename
-    
+
     def get_version_suffix(self, filename):
         """Extract ##version suffix from filename, returns empty string if none."""
         if "##" in filename:
             return "##" + filename.split("##")[1]
         return ""
-    
+
     def get_next_version_suffix(self, filename):
         """Get the next version suffix for duplicating. Appends 1 or 2 to existing suffix."""
         base = self.get_base_filename(filename)
@@ -1288,9 +1300,9 @@ class PVAnnotator(QWidget):
         """
         if not self.media:
             return
-        
+
         search_text = self.search_box.text().strip().lower()
-        
+
         # Special case: empty search in show_skipped mode navigates between skipped files
         if not search_text and self.show_skipped_mode:
             if direction == 0:
@@ -1303,7 +1315,7 @@ class PVAnnotator(QWidget):
                 # Navigate backward to previous skipped file
                 start_idx = (self.index - 1) % len(self.media)
                 step = -1
-            
+
             for i in range(len(self.media)):
                 check_idx = (start_idx + i * step) % len(self.media)
                 if self.data.get(self.get_data_key(check_idx), {}).get("skip", False):
@@ -1312,11 +1324,11 @@ class PVAnnotator(QWidget):
                     self.search_box.setFocus()
                     return
             return  # No skipped files found
-        
+
         # Regular search requires text
         if not search_text:
             return
-        
+
         # For text changes (direction=0), first check if current file matches
         # If so, stay on current file without moving
         if direction == 0:
@@ -1329,7 +1341,7 @@ class PVAnnotator(QWidget):
                     # Current file matches, stay here
                     self.search_box.setFocus()
                     return
-        
+
         # Determine search direction and range
         if direction == 0:
             # Text changed: current didn't match, search forward from next position with wrap-around
@@ -1346,11 +1358,11 @@ class PVAnnotator(QWidget):
             start_idx = (self.index - 1) % len(self.media)
             step = -1
             search_range = len(self.media)
-        
+
         # Search in specified range
         for i in range(search_range):
             check_idx = (start_idx + i * step) % len(self.media)
-            
+
             # Skip files marked with skip=true ONLY when not in show_skipped mode
             if not self.show_skipped_mode and self.data.get(self.get_data_key(check_idx), {}).get("skip", False):
                 continue
@@ -1366,7 +1378,7 @@ class PVAnnotator(QWidget):
                 # Restore focus to search box after showing item
                 self.search_box.setFocus()
                 return
-        
+
         # No match found - stay on current file
 
     def _match_file(self, file_idx, search_text):
@@ -1376,15 +1388,15 @@ class PVAnnotator(QWidget):
         file_path = self.media[file_idx]
         data_key = self.get_data_key(file_idx)
         entry = self.data.get(data_key, {})
-        
+
         # Check date/time field
         if search_text in entry.get("creation_date_time", "").lower():
             return {"type": "datetime"}
-        
+
         # Check filename
         if search_text in file_path.name.lower():
             return {"type": "filename"}
-        
+
         # Check location (with special character normalization)
         location = entry.get("location", {})
         manual_loc = self.normalize_special_chars(location.get("manual_text", "")).lower()
@@ -1393,19 +1405,19 @@ class PVAnnotator(QWidget):
         automated_loc = self.normalize_special_chars(location.get("automated_text", "")).lower()
         if search_text in automated_loc:
             return {"type": "location"}
-        
+
         # Check image text annotation
         if file_path.suffix.lower() in SUPPORTED_IMAGES:
             if search_text in entry.get("text", "").lower():
                 return {"type": "image_text"}
-        
+
         # Check video annotations
         if file_path.suffix.lower() in SUPPORTED_VIDEOS:
             annotations = entry.get("annotations", [])
             for ann in annotations:
                 if search_text in ann.get("text", "").lower():
                     return {"type": "annotation", "annotation_time": ann.get("time", 0.0)}
-        
+
         return None
 
 
@@ -1442,41 +1454,80 @@ class PVAnnotator(QWidget):
                 # Remove legacy creation_time field (we use creation_time_utc, creation_date_time, etc.)
                 self.data[filename].pop("creation_time", None)
 
-        self.json_path.write_text(json.dumps(self.data,indent=2))
+        # Write the main annotations file
+        self.json_path.write_text(json.dumps(self.data, indent=2))
+        
+        # Create a dated backup
+        from datetime import datetime
+        today = datetime.now().strftime("%Y_%m_%d")
+        backup_filename = f"annotations_{today}.json"
+        backup_path = self.pva_data_dir / backup_filename
+        backup_path.write_text(json.dumps(self.data, indent=2))
 
     def check_and_prompt_folders(self):
-        """Check all folders in directory and prompt user if not already set."""
-        for item in self.dir.iterdir():
-            if item.is_dir() and item.name != TRASH_DIR:
-                # Check if we already have a "use" setting for this folder
-                if item.name not in self.data or "use" not in self.data[item.name]:
-                    # Prompt user
-                    reply = QMessageBox.question(
-                        self,
-                        "Include Folder?",
-                        f"Include files from '{item.name}' folder?",
-                        QMessageBox.Yes | QMessageBox.No
-                    )
-                    # Save the choice
-                    if item.name not in self.data:
-                        self.data[item.name] = {}
-                    self.data[item.name]["use"] = (reply == QMessageBox.Yes)
+        """Check all folders (recursively) and prompt user if not already set."""
+        def scan_folders_recursive(base_path, prefix=""):
+            """Recursively scan all subfolders and prompt for each."""
+            for item in sorted(base_path.iterdir()):
+                if item.is_dir() and item.name != TRASH_DIR and item.name != PVA_DATA_DIR:
+                    # Create folder key: relative path from self.dir
+                    try:
+                        folder_key = str(item.relative_to(self.dir))
+                    except ValueError:
+                        folder_key = item.name
+                    
+                    # Check if we already have a "use" setting for this folder
+                    if folder_key not in self.data or "use" not in self.data[folder_key]:
+                        # Prompt user with the full path
+                        reply = QMessageBox.question(
+                            self,
+                            "Include Folder?",
+                            f"Include files from '{folder_key}' folder?",
+                            QMessageBox.Yes | QMessageBox.No
+                        )
+                        # Save the choice
+                        if folder_key not in self.data:
+                            self.data[folder_key] = {}
+                        self.data[folder_key]["use"] = (reply == QMessageBox.Yes)
+                    
+                    # Recursively scan subfolders
+                    scan_folders_recursive(item, prefix)
+        
+        scan_folders_recursive(self.dir)
         self.save()
 
     def get_all_media_files(self):
-        """Get all media files from root and included folders."""
+        """Get all media files from root and included folders (recursively)."""
         files = []
+        
         # Add files from root directory
         for p in self.dir.iterdir():
             if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGES|SUPPORTED_VIDEOS:
                 files.append(p)
-        # Add files from folders marked with use=true
+        
+        # Add files from folders marked with use=true, including all subfolders
+        def scan_folder_recursive(folder_path):
+            """Recursively collect media files from a folder."""
+            local_files = []
+            for item in folder_path.iterdir():
+                if item.is_file() and item.suffix.lower() in SUPPORTED_IMAGES|SUPPORTED_VIDEOS:
+                    local_files.append(item)
+                elif item.is_dir() and item.name != TRASH_DIR and item.name != PVA_DATA_DIR:
+                    # Recursively scan subfolders
+                    local_files.extend(scan_folder_recursive(item))
+            return local_files
+        
         for item in self.dir.iterdir():
-            if item.is_dir() and item.name != TRASH_DIR:
-                if self.data.get(item.name, {}).get("use", False):
-                    for p in item.iterdir():
-                        if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGES|SUPPORTED_VIDEOS:
-                            files.append(p)
+            if item.is_dir() and item.name != TRASH_DIR and item.name != PVA_DATA_DIR:
+                # Check if this folder or any of its parent folders is marked to use
+                try:
+                    folder_key = str(item.relative_to(self.dir))
+                except ValueError:
+                    folder_key = item.name
+                
+                if self.data.get(folder_key, {}).get("use", False):
+                    files.extend(scan_folder_recursive(item))
+        
         return files
 
     # ---------------- Media Display ----------------
@@ -1533,7 +1584,7 @@ class PVAnnotator(QWidget):
         # Display the time value used for sorting
         filename = data_key
         entry = self.data.get(data_key, {})
-        
+
         # Priority: creation_time_manual > creation_date_time
         ts = None
         if "creation_time_manual" in entry:
@@ -1544,10 +1595,10 @@ class PVAnnotator(QWidget):
                 epoch = parse_creation_value(manual_val)
                 if epoch is not None:
                     ts = format_creation_timestamp(epoch)
-        
+
         if ts is None and "creation_date_time" in entry:
             ts = entry.get("creation_date_time")
-        
+
         if ts is None:
             ts = "No date/time"
 
@@ -1571,7 +1622,7 @@ class PVAnnotator(QWidget):
 
         # Dropdown locations - sorted by distance to current file
         current_loc=entry.get("location",{}).get("manual_text","") or entry.get("location",{}).get("automated_text","")
-        
+
         # Collect all unique locations and find files that have them
         location_files = {}  # location -> list of (index, file_path)
         for idx, file_path in enumerate(self.media):
@@ -1582,7 +1633,7 @@ class PVAnnotator(QWidget):
                 if loc not in location_files:
                     location_files[loc] = []
                 location_files[loc].append((idx, file_path))
-        
+
         # Calculate distance for each location (minimum distance to current file)
         current_idx = self.index
         location_distances = {}  # location -> (min_distance, min_index_at_that_distance)
@@ -1595,23 +1646,23 @@ class PVAnnotator(QWidget):
                     min_distance = distance
                     min_index = idx
             location_distances[loc] = (min_distance, min_index)
-        
+
         # Sort locations by distance (descending - most distant first), then by index (ascending)
         # This puts closest locations near the bottom, with current location at absolute bottom
         sorted_locations = sorted(location_distances.items(), key=lambda x: (-x[1][0], x[1][1]))
-        
+
         # Populate dropdown with sorted locations, then current location at bottom
         self.location_combo.blockSignals(True)
         self.location_combo.clear()
-        
+
         # Add all other locations (excluding current location to avoid duplicates)
         for loc, _ in sorted_locations:
             if loc != current_loc:
                 self.location_combo.addItem(loc)
-        
+
         # Always add current location at the bottom (or empty string if no location)
         self.location_combo.addItem(current_loc if current_loc else "")
-        
+
         # Set current index to the last item (current file's location)
         self.location_combo.setCurrentIndex(self.location_combo.count() - 1)
         self.location_combo.blockSignals(False)
@@ -1663,10 +1714,10 @@ class PVAnnotator(QWidget):
             rot=entry.get("rotation",0)
             qimg=load_image(p,rot)
             pix=QPixmap.fromImage(qimg)
-            
+
             # Store original pixmap for crop selection
             self.image_label.original_pixmap = pix
-            
+
             # Apply crop if it exists
             crop_coords = entry.get("crop")
             if crop_coords:
@@ -1682,7 +1733,7 @@ class PVAnnotator(QWidget):
                     self.crop_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
                 else:
                     self.crop_btn.setStyleSheet("font-weight: bold;")
-            
+
             # Update crop button click handler for uncrop if needed
             if crop_coords:
                 self.crop_btn.clicked.disconnect()
@@ -1690,7 +1741,7 @@ class PVAnnotator(QWidget):
             else:
                 self.crop_btn.clicked.disconnect()
                 self.crop_btn.clicked.connect(lambda: self.handle_button_click(self.toggle_crop_mode))
-            
+
             self.video_player.stop()
         else:
             self.image_label.hide()
@@ -1731,7 +1782,7 @@ class PVAnnotator(QWidget):
             self.video_player.setSource(QUrl.fromLocalFile(str(p)))
             # Use a single-shot timer to allow the source to load before playing
             QTimer.singleShot(100, self.video_player.play)
-        
+
         # Update Skip button text and styling based on whether current file is skipped
         if entry.get("skip", False):
             self.skip_btn.setText("Unskip")
@@ -1766,18 +1817,18 @@ class PVAnnotator(QWidget):
         """Remove duplicate annotations at the same timestamp, keeping the one with non-empty skip and text."""
         if not annotations:
             return False
-        
+
         # Group annotations by time
         from collections import defaultdict
         time_groups = defaultdict(list)
         for ann in annotations:
             time_groups[ann.get("time", 0.0)].append(ann)
-        
+
         # Check if we have any duplicates
         has_duplicates = any(len(group) > 1 for group in time_groups.values())
         if not has_duplicates:
             return False
-        
+
         # For each time with duplicates, keep the best one
         kept_annotations = []
         for time_val, group in time_groups.items():
@@ -1789,10 +1840,10 @@ class PVAnnotator(QWidget):
                     has_text = bool(ann.get("text", "").strip())
                     has_skip = bool(ann.get("skip", False))
                     return (has_text, has_skip)
-                
+
                 best_ann = max(group, key=priority)
                 kept_annotations.append(best_ann)
-        
+
         # Replace the list contents
         annotations.clear()
         annotations.extend(kept_annotations)
@@ -1938,20 +1989,20 @@ class PVAnnotator(QWidget):
     def handle_video_end(self, status):
         """Handle video reaching the end - reset to first non-skipped segment or beginning."""
         from PySide6.QtMultimedia import QMediaPlayer
-        
+
         # Only handle EndOfMedia status
         if status != QMediaPlayer.MediaStatus.EndOfMedia:
             return
-        
+
         # If in slideshow mode, let the slideshow timer handle advancement
         if self.slideshow:
             return
-        
+
         # Find first non-skipped annotation
         p = self.current()
         if p.suffix.lower() in SUPPORTED_VIDEOS:
             annotations = self.get_current_video_annotations()
-            
+
             # Find the first non-skipped annotation
             reset_time = 0  # Default to beginning if all are skipped
             if annotations:
@@ -1960,7 +2011,7 @@ class PVAnnotator(QWidget):
                     if not ann.get("skip", False):
                         reset_time = ann["time"]
                         break
-            
+
             # Reset to the appropriate position, pause, and show annotation
             reset_pos_ms = int(reset_time * 1000)
             self.video_player.setPosition(reset_pos_ms)
@@ -2155,7 +2206,7 @@ class PVAnnotator(QWidget):
         # Text box contains wrapped version; we only save original after slideshow ends
         if self.slideshow:
             return
-        
+
         if self._text_change_in_progress:
             return
         self._text_change_in_progress = True
@@ -2262,7 +2313,7 @@ class PVAnnotator(QWidget):
         # Text box contains wrapped version; we only save original after slideshow ends
         if self.slideshow:
             return
-        
+
         p=self.current()
         data_key = self.get_data_key()
         if p.suffix.lower() in SUPPORTED_IMAGES:
@@ -2328,26 +2379,26 @@ class PVAnnotator(QWidget):
                     return (ts, version_suffix)
             version_suffix = self.get_version_suffix(key)
             return (9999999999, version_suffix)
-        
+
         # Sort indices
         sorted_indices = sorted(range(len(self.media)), key=sort_key_indexed)
-        
+
         # Rebuild media and mapping in sorted order
         old_media = self.media[:]
         old_mapping = self.media_to_data_key.copy()
-        
+
         self.media = [old_media[i] for i in sorted_indices]
-        
+
         # Create new mapping with sorted indices
         old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(sorted_indices)}
         self.media_to_data_key = {old_to_new[old_idx]: old_mapping[old_idx] for old_idx in old_mapping}
-        
+
         # Find where current file ended up in the new order
         for idx, key in self.media_to_data_key.items():
             if key == data_key:
                 self.index = idx
                 break
-        
+
         self.update_position_display()
         self.show_item()
 
@@ -2391,26 +2442,26 @@ class PVAnnotator(QWidget):
         """Restart the slideshow timer for the current item with updated delay."""
         if not self.slideshow:
             return
-        
+
         p = self.current()
         image_time = self.get_image_time()
         image_time_ms = int(image_time * 1000)
-        
+
         # Stop current timers
         self.timer.stop()
         self.text_scroll_timer.stop()
-        
+
         if p.suffix.lower() in SUPPORTED_IMAGES:
             text = self.text_box.toPlainText()
             text_lines = text.split('\n')
             explicit_lines = len(text_lines)  # Number of line breaks + 1
             char_count = len(text)
-            
+
             # Calculate how many display lines are needed
             # User sees ~160 chars per line at current font size
             display_lines = max(1, (char_count + 159) // 160)  # Round up
             num_lines = max(explicit_lines, display_lines)  # Use the larger value
-            
+
             if char_count < 150 and num_lines <= 1:
                 # Less than 150 characters and no line breaks: use delay time only
                 self.timer.start(image_time_ms)
@@ -2431,18 +2482,18 @@ class PVAnnotator(QWidget):
                     # Total time is max of configured delay or char_count / 25 seconds
                     total_time = max(image_time, char_count / 25)
                     total_duration_ms = int(total_time * 1000)
-                    
+
                     # Distribute time: 1 second initial + scroll + 1 second final
                     initial_pause = 1000
                     final_pause = 1000
                     scroll_duration = total_duration_ms - initial_pause - final_pause
-                    
+
                     # Ensure at least some scroll duration
                     if scroll_duration < 500:
                         scroll_duration = 500
                         initial_pause = max(100, (total_duration_ms - scroll_duration) // 2)
                         final_pause = total_duration_ms - initial_pause - scroll_duration
-                    
+
                     self._text_scroll_complete = False  # Reset flag for this item
                     self.timer.start(total_duration_ms)
                     self.start_text_scroll(initial_pause, scroll_duration, scroll_steps)
@@ -2552,30 +2603,30 @@ class PVAnnotator(QWidget):
         p = self.current()
         current_data_key = self.get_data_key()
         base_filename = self.get_base_filename(current_data_key)
-        
+
         # Get the original entry (deep copy before we modify anything)
         import copy
         original_entry = copy.deepcopy(self.data.get(current_data_key, {}))
-        
+
         # Generate version suffixes
         suffix1, suffix2 = self.get_next_version_suffix(current_data_key)
         new_key1 = base_filename + suffix1
         new_key2 = base_filename + suffix2
-        
+
         # Always remove the current entry (whether versioned or not)
         self.data.pop(current_data_key, None)
-        
+
         # Create both new versioned entries from the original
         self.data[new_key1] = copy.deepcopy(original_entry)
         self.data[new_key2] = copy.deepcopy(original_entry)
-        
+
         self.save()
-        
+
         # Now update self.media to include both versions
         # Insert the same Path object at the current position (for the second version)
         current_index = self.index
         self.media.insert(current_index + 1, p)  # Insert second copy after current
-        
+
         # Update the mapping: shift all indices after current
         new_mapping = {}
         for idx, key in self.media_to_data_key.items():
@@ -2587,7 +2638,7 @@ class PVAnnotator(QWidget):
             else:
                 new_mapping[idx + 1] = key  # Shift by one
         self.media_to_data_key = new_mapping
-        
+
         # Stay on the first version
         self.index = current_index
         self.show_item()
@@ -2599,11 +2650,11 @@ class PVAnnotator(QWidget):
         # Only allow cropping for images
         if p.suffix.lower() not in SUPPORTED_IMAGES:
             return
-        
+
         # Toggle crop mode
         self.crop_mode = not self.crop_mode
         self.image_label.crop_mode = self.crop_mode
-        
+
         if self.crop_mode:
             self.crop_btn.setText("Cropping")
             self.crop_btn.setStyleSheet("background-color: orange; color: white; font-weight: bold;")
@@ -2620,7 +2671,7 @@ class PVAnnotator(QWidget):
                 else:
                     self.crop_btn.setStyleSheet("font-weight: bold;")
             self.image_label.setCursor(Qt.ArrowCursor)
-    
+
     def cancel_crop_mode(self):
         """Cancel crop mode without saving."""
         if self.crop_mode:
@@ -2642,17 +2693,17 @@ class PVAnnotator(QWidget):
                 else:
                     self.crop_btn.setStyleSheet("font-weight: bold;")
             self.image_label.setCursor(Qt.ArrowCursor)
-    
+
     def apply_crop(self, crop_coords):
         """Store crop coordinates and exit crop mode."""
         p = self.current()
         data_key = self.get_data_key()
         entry = self.data.setdefault(data_key, {})
-        
+
         # Store crop as (x1, y1, x2, y2)
         entry["crop"] = crop_coords
         self.save()
-        
+
         # Exit crop mode and refresh display
         self.crop_mode = False
         self.image_label.crop_mode = False
@@ -2660,7 +2711,7 @@ class PVAnnotator(QWidget):
         self.crop_btn.setText("Uncrop")
         self.crop_btn.setStyleSheet("background-color: black; color: white; font-weight: bold;")
         self.show_item()
-    
+
     def clear_crop(self):
         """Remove crop and restore full image."""
         p = self.current()
@@ -2708,16 +2759,16 @@ class PVAnnotator(QWidget):
         if p.suffix.lower() in SUPPORTED_VIDEOS:
             self.video_player.stop()
             self.video_player.setSource(QUrl())
-        
+
         file_parent = p.parent
         trash_dir = file_parent / TRASH_DIR
         trash_dir.mkdir(exist_ok=True)
         shutil.move(str(p), trash_dir / p.name)
-        
+
         # Remove this specific version from data and media
         data_key = self.get_data_key()
         self.data.pop(data_key, None)
-        
+
         # Remove from media by index (not by Path, which would remove the first occurrence)
         if self.index < len(self.media):
             self.media.pop(self.index)
@@ -2732,10 +2783,10 @@ class PVAnnotator(QWidget):
                     else:
                         new_mapping[idx] = key
                 self.media_to_data_key = new_mapping
-        
+
         self.index = min(self.index, len(self.media) - 1) if self.media else 0
         self.save()
-        
+
         if self.media:
             # Skip over any files marked as skip=true ONLY when NOT in show_skipped_mode
             if not self.show_skipped_mode:
@@ -2798,13 +2849,13 @@ class PVAnnotator(QWidget):
         Returns milliseconds remaining from current playback position."""
         # Get current position
         current_pos_ms = self.video_player.position()
-        
+
         # Get effective end position
         effective_end_ms = self.get_effective_video_duration_ms(video_path)
-        
+
         if not effective_end_ms or effective_end_ms <= current_pos_ms:
             return 0
-        
+
         return effective_end_ms - current_pos_ms
 
     def stop_slideshow_if_running(self):
@@ -2826,6 +2877,7 @@ class PVAnnotator(QWidget):
                 self.text_box.blockSignals(False)
             # CRITICAL: Re-enable text box (was disabled during slideshow to prevent saving)
             self.text_box.setReadOnly(False)
+            self.text_box.setFocus()  # Restore focus to ensure text box is fully interactive
             # Re-enable Skip and Discard buttons
             self.skip_btn.setEnabled(True)
             if sys.platform.startswith('linux') or sys.platform == 'darwin':
@@ -2899,7 +2951,7 @@ class PVAnnotator(QWidget):
                 text_lines = text.split('\n')
                 explicit_lines = len(text_lines)  # Number of line breaks + 1
                 char_count = len(text)
-                
+
                 if char_count < 150 and explicit_lines <= 1:
                     # Less than 150 characters and no line breaks: use delay time only
                     self.timer.start(image_time_ms)
@@ -2918,23 +2970,23 @@ class PVAnnotator(QWidget):
                     else:
                         display_lines = max(1, (char_count + 159) // 160)  # Round up using 160 chars per line
                         num_lines = max(explicit_lines, display_lines)  # Use the larger value
-                        
+
                         scroll_steps = max(num_lines - 3, 1)
                         # Total time is max of configured delay or char_count / 25 seconds
                         total_time = max(image_time, char_count / 25)
                         total_duration_ms = int(total_time * 1000)
-                        
+
                         # Distribute time: 1 second initial + scroll + 1 second final
                         initial_pause = 1000
                         final_pause = 1000
                         scroll_duration = total_duration_ms - initial_pause - final_pause
-                        
+
                         # Ensure at least some scroll duration
                         if scroll_duration < 500:
                             scroll_duration = 500
                             initial_pause = max(100, (total_duration_ms - scroll_duration) // 2)
                             final_pause = total_duration_ms - initial_pause - scroll_duration
-                        
+
                         self._text_scroll_complete = False  # Reset flag for this item
                         self.timer.start(total_duration_ms)
                         self.start_text_scroll(initial_pause, scroll_duration, scroll_steps)
@@ -2956,6 +3008,9 @@ class PVAnnotator(QWidget):
                 self.trash_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
             else:
                 self.trash_btn.setStyleSheet("font-weight: bold;")
+            # CRITICAL: Re-enable text box (was disabled during slideshow to prevent saving)
+            self.text_box.setReadOnly(False)
+            self.text_box.setFocus()  # Restore focus to ensure text box is fully interactive
             # Re-enable Rotate and Duplicate buttons if appropriate
             self.timer.stop()
             p=self.current()
@@ -3022,16 +3077,16 @@ class PVAnnotator(QWidget):
         """
         wrapped_lines = []
         remaining = text
-        
+
         while remaining:
             if len(remaining) <= max_width:
                 wrapped_lines.append(remaining)
                 break
-            
+
             # Find the last space within max_width
             chunk = remaining[:max_width]
             last_space = chunk.rfind(' ')
-            
+
             if last_space > 0:
                 # Break at the last space
                 wrapped_lines.append(remaining[:last_space])
@@ -3040,7 +3095,7 @@ class PVAnnotator(QWidget):
                 # No space found, break at max_width anyway
                 wrapped_lines.append(chunk)
                 remaining = remaining[max_width:]
-        
+
         return wrapped_lines
 
     def _prepare_text_for_slideshow(self, text):
@@ -3048,19 +3103,19 @@ class PVAnnotator(QWidget):
         We keep the original text intact and use cursor positioning to scroll."""
         if not text:
             return
-        
+
         # Save the original text for restoration when slideshow ends
         self._original_annotation_text = text
-        
+
         # Analyze text to see if scrolling is needed
         text_lines = text.split('\n')
         explicit_lines = len(text_lines)
         char_count = len(text)
-        
+
         # Calculate display lines (160 chars per line)
         display_lines = max(1, (char_count + 159) // 160)
         num_lines = max(explicit_lines, display_lines)
-        
+
         # If text needs scrolling (more than 3 lines), set up for scrolling
         # But keep the text unmodified in the box
         if num_lines > 3:
@@ -3070,7 +3125,7 @@ class PVAnnotator(QWidget):
 
     def start_text_scroll(self, initial_pause_ms, scroll_duration_ms, scroll_steps):
         """Start scrolling text during slideshow by moving cursor, not by modifying text.
-        
+
         Args:
             initial_pause_ms: Time to pause before starting scroll
             scroll_duration_ms: Total time for scrolling
@@ -3078,27 +3133,27 @@ class PVAnnotator(QWidget):
         """
         if not self.slideshow:
             return
-        
+
         # Use the original saved text (never modified)
         if not hasattr(self, '_original_annotation_text'):
             return
-        
+
         text = self._original_annotation_text
-        
+
         if not text:
             return
-        
+
         # Split text by newlines to get explicit lines
         lines = text.split('\n')
         explicit_lines = len(lines)
         char_count = len(text)
-        
+
         # Calculate display lines needed (160 chars per line at current font size)
         display_lines = max(1, (char_count + 159) // 160)
-        
+
         # Total lines to scroll through
         num_lines = max(explicit_lines, display_lines)
-        
+
         # Only scroll if we have more than 3 lines total
         if num_lines > 3:
             # Store scroll parameters for cursor-based scrolling
@@ -3107,7 +3162,7 @@ class PVAnnotator(QWidget):
             scroll_interval = max(900, scroll_duration_ms // scroll_steps) if scroll_steps > 0 else 900
             self.text_scroll_interval = scroll_interval
             self.text_scroll_steps = scroll_steps
-            
+
             # Start with initial pause before scrolling begins
             QTimer.singleShot(initial_pause_ms, self._start_scrolling_after_delay)
 
@@ -3123,27 +3178,27 @@ class PVAnnotator(QWidget):
         if not text:
             self.text_scroll_timer.stop()
             return
-        
+
         # Calculate display metrics
         lines = text.split('\n')
         explicit_lines = len(lines)
         char_count = len(text)
         display_lines = max(1, (char_count + 159) // 160)
         num_lines = max(explicit_lines, display_lines)
-        
+
         # Advance to next line if not at end
         if self.text_scroll_line_index < num_lines - 3:
             self.text_scroll_line_index += 1
-            
+
             # Use vertical scrollbar to scroll the view
             scrollbar = self.text_box.verticalScrollBar()
-            
+
             # Estimate scroll position based on which "line" we're viewing
             # Each "line" in scrollbar units should advance based on font height
             # Get font metrics to know line height
             fm = self.text_box.fontMetrics()
             line_height = fm.lineSpacing()
-            
+
             # Scroll position = current line index * line height
             # But we want to show lines starting from this index
             scroll_amount = self.text_scroll_line_index * line_height
