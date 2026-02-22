@@ -8,7 +8,7 @@ The PVA Photo and Video Annotator is a desktop application for organizing and vi
 
 ## Project website
 
-The [Project website](https://clzirbel.github.io/pva_photo_video_annotator) has a video walkthrough, list of features, executables to download, and usage instructions with screenshots
+The [project website](https://clzirbel.github.io/pva_photo_video_annotator) has a video walkthrough, list of features, executables to download, and usage instructions with screenshots
 
 ## Python Code
 
