@@ -737,6 +737,7 @@ class PVAnnotator(QWidget):
 
         self.dir=None; self.media=[]; self.index=0
         self.data={}; self.slideshow=False
+        self.data_changed = False  # Track if data has been modified and needs saving
         self.timer=QTimer(); self.timer.timeout.connect(self.advance_slideshow)
         self.media_to_data_key = {}  # Maps index in self.media to data key (may include ##version)
 
@@ -919,18 +920,18 @@ class PVAnnotator(QWidget):
             if not d: sys.exit()
             self.dir=Path(d)
         self.trash=self.dir/TRASH_DIR
-        
+
         # Set up pva_data directory and handle migration
         self.pva_data_dir = self.dir / PVA_DATA_DIR
         self.pva_data_dir.mkdir(exist_ok=True)
         self.json_path = self.pva_data_dir / JSON_NAME
-        
+
         # Migrate annotations.json from root to pva_data if needed
         old_json_path = self.dir / JSON_NAME
         if old_json_path.exists() and not self.json_path.exists():
             # Move the old file to the new location
             shutil.move(str(old_json_path), str(self.json_path))
-        
+
         if self.json_path.exists():
             self.data=json.loads(self.json_path.read_text())
         else: self.data={"_settings":{"font_size":DEFAULT_FONT_SIZE,"image_time":DEFAULT_IMAGE_TIME}}
@@ -1150,7 +1151,182 @@ class PVAnnotator(QWidget):
             self.text_box.setText("")
         finally:
             self.text_box.blockSignals(False)
+
+        # Handle duplicate filenames with different timestamps
+        self.handle_duplicate_filenames()
+
         self.show_item()
+
+    def handle_duplicate_filenames(self):
+        """Find duplicate filenames and offer to rename them.
+        Handles both same and different timestamps."""
+        # Group files by exact filename - must be identical
+        from collections import defaultdict
+        files_by_name = defaultdict(list)
+
+        for file_path in self.media:
+            # Use exact filename - no suffix stripping
+            # Files must have identical names to be considered duplicates
+            files_by_name[file_path.name].append(file_path)
+
+        # Find groups with duplicate filenames
+        duplicates_to_handle = []
+        for base_name, file_paths in files_by_name.items():
+            # Skip if only one file with this name
+            if len(file_paths) <= 1:
+                continue
+
+            # Check if files are in different locations (different folders OR different paths)
+            unique_paths = set(str(p) for p in file_paths)
+            if len(unique_paths) <= 1:
+                # All paths are the same - not duplicates
+                continue
+
+            # Get timestamps for each file
+            file_info = []
+            for p in file_paths:
+                data_key = p.name
+                entry = self.data.get(data_key, {})
+
+                # Try to get timestamp from data
+                ts = parse_creation_value(entry.get("creation_time_manual"))
+                if ts is None:
+                    ts = parse_creation_value(entry.get("creation_date_time"))
+                if ts is None:
+                    # Try to extract directly from file if not in JSON yet
+                    self.get_cached_creation_time(p)
+                    entry = self.data.get(data_key, {})
+                    ts = parse_creation_value(entry.get("creation_date_time"))
+                if ts is None:
+                    ts = 0
+
+                file_info.append((p, ts))
+
+            # Sort by timestamp
+            file_info.sort(key=lambda x: x[1])
+
+            # Check if all timestamps are the same
+            timestamps = [ts for _, ts in file_info]
+            all_same_timestamp = len(set(timestamps)) == 1 and timestamps[0] != 0
+
+            # Add to list - handle both same and different timestamps
+            duplicates_to_handle.append((file_info, all_same_timestamp))
+
+        # Process each duplicate group
+        for file_group, same_timestamp in duplicates_to_handle:
+            if not self.show_duplicate_rename_dialog(file_group, same_timestamp):
+                # User clicked "Skip this step"
+                break
+
+    def show_duplicate_rename_dialog(self, file_group, same_timestamp=False):
+        """Show dialog for renaming duplicate files. Returns False if user clicked Skip."""
+        from datetime import datetime
+
+        # Build message with file list and proposed renames
+        if same_timestamp:
+            message_lines = ["These files have the same filename and the same timestamp.\n"]
+            message_lines.append("They appear to be duplicates of the same file.\n")
+            message_lines.append("OK to modify the filenames as shown?\n\n")
+        else:
+            message_lines = ["These files have the same filename but different timestamps.\n"]
+            message_lines.append("OK to modify the filenames as shown?\n\n")
+
+        for idx, (file_path, timestamp) in enumerate(file_group):
+            if timestamp > 0:
+                time_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                time_str = "Unknown"
+
+            # Get folder relative to root
+            try:
+                folder = str(file_path.parent.relative_to(self.dir))
+            except ValueError:
+                folder = str(file_path.parent)
+
+            if idx == 0:
+                proposed_name = file_path.name
+            else:
+                # Insert _pva_N before extension
+                name_parts = file_path.name.rsplit(".", 1)
+                if len(name_parts) == 2:
+                    proposed_name = f"{name_parts[0]}_pva_{idx}.{name_parts[1]}"
+                else:
+                    proposed_name = f"{file_path.name}_pva_{idx}"
+
+            message_lines.append(f"  {file_path.name} → {proposed_name}")
+            message_lines.append(f"    Folder: {folder}, Time: {time_str}\n")
+
+        message = "\n".join(message_lines)
+
+        # Create custom dialog with three buttons
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Duplicate Filenames")
+        dialog.setText(message)
+
+        yes_btn = dialog.addButton("Yes", QMessageBox.AcceptRole)
+        no_btn = dialog.addButton("No", QMessageBox.RejectRole)
+        skip_btn = dialog.addButton("Skip this step", QMessageBox.DestructiveRole)
+
+        dialog.setDefaultButton(yes_btn)
+        result = dialog.exec()
+        clicked_button = dialog.clickedButton()
+
+        if clicked_button == yes_btn:
+            # Rename files and update data
+            self.rename_duplicate_files(file_group)
+            return True
+        elif clicked_button == no_btn:
+            # Skip this group, continue to next
+            return True
+        else:  # skip_btn
+            # Stop processing
+            return False
+
+    def rename_duplicate_files(self, file_group):
+        """Rename duplicate files with _pva_N suffixes."""
+        renamed_map = {}  # Old path -> new path
+
+        # First pass: rename all files except the first
+        for idx, (file_path, _) in enumerate(file_group):
+            if idx == 0:
+                continue  # Keep first file unchanged
+
+            # Build new filename with _pva_N suffix
+            name_parts = file_path.name.rsplit(".", 1)
+            if len(name_parts) == 2:
+                new_name = f"{name_parts[0]}_pva_{idx}.{name_parts[1]}"
+            else:
+                new_name = f"{file_path.name}_pva_{idx}"
+
+            new_path = file_path.parent / new_name
+
+            # Rename the file
+            file_path.rename(new_path)
+            renamed_map[file_path] = new_path
+
+            # Update data dict: move entry from old key to new key
+            old_key = file_path.name
+            if old_key in self.data:
+                self.data[new_name] = self.data.pop(old_key)
+                self.mark_data_changed()
+
+        # Update self.media list with new paths
+        for i, old_path in enumerate(self.media):
+            if old_path in renamed_map:
+                self.media[i] = renamed_map[old_path]
+
+        # Re-read metadata for renamed files to get separate entries
+        for old_path, new_path in renamed_map.items():
+            # Force re-read of file metadata
+            data_key = new_path.name
+            entry = self.data.get(data_key, {})
+
+            # Re-extract creation time if available
+            if new_path.suffix.lower() in SUPPORTED_IMAGES:
+                gps = get_exif_gps(new_path)
+                # The extraction will happen naturally when show_item is called
+            elif new_path.suffix.lower() in SUPPORTED_VIDEOS:
+                pass  # Video metadata extraction happens on demand
 
     # ---------------- Helpers ----------------
     def normalize_creation_times(self):
@@ -1441,7 +1617,17 @@ class PVAnnotator(QWidget):
         self.position_box.setText(text)
         self.position_box.blockSignals(False)
 
+    def mark_data_changed(self):
+        """Mark data as changed and save. Convenience method for data modifications."""
+        self.data_changed = True
+        self.save()
+
     def save(self):
+        """Save data to JSON files only if data has changed."""
+        # Only proceed if data has actually changed
+        if not self.data_changed:
+            return
+
         # Build a fast lookup set of video filenames for O(1) lookup
         video_names = {p.name for p in self.media if p.suffix.lower() in SUPPORTED_VIDEOS}
 
@@ -1456,7 +1642,7 @@ class PVAnnotator(QWidget):
 
         # Write the main annotations file
         self.json_path.write_text(json.dumps(self.data, indent=2))
-        
+
         # Create a dated backup
         from datetime import datetime
         today = datetime.now().strftime("%Y_%m_%d")
@@ -1464,70 +1650,105 @@ class PVAnnotator(QWidget):
         backup_path = self.pva_data_dir / backup_filename
         backup_path.write_text(json.dumps(self.data, indent=2))
 
+        # Reset the dirty flag after successful save
+        self.data_changed = False
+
     def check_and_prompt_folders(self):
-        """Check all folders (recursively) and prompt user if not already set."""
+        """Check all folders (recursively) and prompt user if not already set.
+        Gracefully skips folders that no longer exist."""
         def scan_folders_recursive(base_path, prefix=""):
             """Recursively scan all subfolders and prompt for each."""
-            for item in sorted(base_path.iterdir()):
-                if item.is_dir() and item.name != TRASH_DIR and item.name != PVA_DATA_DIR:
-                    # Create folder key: relative path from self.dir
-                    try:
-                        folder_key = str(item.relative_to(self.dir))
-                    except ValueError:
-                        folder_key = item.name
-                    
-                    # Check if we already have a "use" setting for this folder
-                    if folder_key not in self.data or "use" not in self.data[folder_key]:
-                        # Prompt user with the full path
-                        reply = QMessageBox.question(
-                            self,
-                            "Include Folder?",
-                            f"Include files from '{folder_key}' folder?",
-                            QMessageBox.Yes | QMessageBox.No
-                        )
-                        # Save the choice
-                        if folder_key not in self.data:
-                            self.data[folder_key] = {}
-                        self.data[folder_key]["use"] = (reply == QMessageBox.Yes)
-                    
-                    # Recursively scan subfolders
-                    scan_folders_recursive(item, prefix)
-        
+            try:
+                for item in sorted(base_path.iterdir()):
+                    if item.is_dir() and item.name != TRASH_DIR and item.name != PVA_DATA_DIR:
+                        # Check if folder exists and is accessible
+                        try:
+                            item.stat()  # Check if path exists and is accessible
+                        except (OSError, FileNotFoundError):
+                            # Folder was moved/deleted - skip it
+                            continue
+
+                        # Create folder key: relative path from self.dir
+                        try:
+                            folder_key = str(item.relative_to(self.dir))
+                        except ValueError:
+                            folder_key = item.name
+
+                        # Check if we already have a "use" setting for this folder
+                        if folder_key not in self.data or "use" not in self.data[folder_key]:
+                            # Prompt user with the full path
+                            reply = QMessageBox.question(
+                                self,
+                                "Include Folder?",
+                                f"Include files from '{folder_key}' folder?",
+                                QMessageBox.Yes | QMessageBox.No
+                            )
+                            # Save the choice
+                            if folder_key not in self.data:
+                                self.data[folder_key] = {}
+                            self.data[folder_key]["use"] = (reply == QMessageBox.Yes)
+
+                        # Recursively scan subfolders
+                        scan_folders_recursive(item, prefix)
+            except (OSError, PermissionError):
+                # Folder access error - skip and continue
+                pass
+
         scan_folders_recursive(self.dir)
         self.save()
 
     def get_all_media_files(self):
-        """Get all media files from root and included folders (recursively)."""
+        """Get all media files from root and included folders (recursively).
+        Gracefully handles missing folders by skipping them."""
         files = []
-        
+
         # Add files from root directory
-        for p in self.dir.iterdir():
-            if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGES|SUPPORTED_VIDEOS:
-                files.append(p)
-        
+        try:
+            for p in self.dir.iterdir():
+                if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGES|SUPPORTED_VIDEOS:
+                    files.append(p)
+        except (OSError, PermissionError):
+            # Root directory access error - skip and continue
+            pass
+
         # Add files from folders marked with use=true, including all subfolders
         def scan_folder_recursive(folder_path):
             """Recursively collect media files from a folder."""
             local_files = []
-            for item in folder_path.iterdir():
-                if item.is_file() and item.suffix.lower() in SUPPORTED_IMAGES|SUPPORTED_VIDEOS:
-                    local_files.append(item)
-                elif item.is_dir() and item.name != TRASH_DIR and item.name != PVA_DATA_DIR:
-                    # Recursively scan subfolders
-                    local_files.extend(scan_folder_recursive(item))
+            try:
+                for item in folder_path.iterdir():
+                    if item.is_file() and item.suffix.lower() in SUPPORTED_IMAGES|SUPPORTED_VIDEOS:
+                        local_files.append(item)
+                    elif item.is_dir() and item.name != TRASH_DIR and item.name != PVA_DATA_DIR:
+                        # Recursively scan subfolders
+                        local_files.extend(scan_folder_recursive(item))
+            except (OSError, PermissionError):
+                # Folder access error - skip this folder and continue
+                pass
             return local_files
-        
-        for item in self.dir.iterdir():
-            if item.is_dir() and item.name != TRASH_DIR and item.name != PVA_DATA_DIR:
-                # Check if this folder or any of its parent folders is marked to use
-                try:
-                    folder_key = str(item.relative_to(self.dir))
-                except ValueError:
-                    folder_key = item.name
-                
-                if self.data.get(folder_key, {}).get("use", False):
-                    files.extend(scan_folder_recursive(item))
-        
+
+        try:
+            for item in self.dir.iterdir():
+                if item.is_dir() and item.name != TRASH_DIR and item.name != PVA_DATA_DIR:
+                    # Check if folder exists and is accessible
+                    try:
+                        item.stat()  # Check if path exists and is accessible
+                    except (OSError, FileNotFoundError):
+                        # Folder was moved/deleted - skip it
+                        continue
+
+                    # Check if this folder or any of its parent folders is marked to use
+                    try:
+                        folder_key = str(item.relative_to(self.dir))
+                    except ValueError:
+                        folder_key = item.name
+
+                    if self.data.get(folder_key, {}).get("use", False):
+                        files.extend(scan_folder_recursive(item))
+        except (OSError, PermissionError):
+            # Root directory access error - skip and continue
+            pass
+
         return files
 
     # ---------------- Media Display ----------------
@@ -2068,7 +2289,7 @@ class PVAnnotator(QWidget):
                 "text": text
             })
             annotations.sort(key=lambda a: a["time"])
-            self.save()
+            self.mark_data_changed()
         self.new_annotation_pending = False
         if hasattr(self, "new_annotation_timestamp"):
             delattr(self, "new_annotation_timestamp")
@@ -2128,7 +2349,7 @@ class PVAnnotator(QWidget):
     def commit_editing_annotation(self):
         if hasattr(self, "editing_annotation"):
             self.editing_annotation["text"] = self.text_box.toPlainText()
-            self.save()
+            self.mark_data_changed()
             # Keep index in sync only while editing; remove both markers together
             if hasattr(self, "editing_annotation_idx"):
                 del self.editing_annotation_idx
@@ -2153,7 +2374,7 @@ class PVAnnotator(QWidget):
         annotations = self.get_current_video_annotations()
         self.editing_annotation["time"] = pos_sec
         annotations.sort(key=lambda a: a["time"])
-        self.save()
+        self.mark_data_changed()
 
     def finish_edit_mode(self):
         """End editing: capture time/text, reset visuals."""
@@ -2201,7 +2422,8 @@ class PVAnnotator(QWidget):
         return active or annotations[0]
 
     def update_active_annotation_text(self):
-        """While typing, pause video and write text into the active annotation."""
+        """While typing, update text in the active annotation (but don't save yet).
+        Text will be saved when focus leaves the text box."""
         # CRITICAL: Never save wrapped text during slideshow
         # Text box contains wrapped version; we only save original after slideshow ends
         if self.slideshow:
@@ -2233,7 +2455,8 @@ class PVAnnotator(QWidget):
 
                 target["text"] = self.text_box.toPlainText()
 
-            self.save()
+            # Mark data as changed so it will be saved when appropriate
+            self.data_changed = True
         finally:
             self._text_change_in_progress = False
 
@@ -2244,6 +2467,9 @@ class PVAnnotator(QWidget):
         if not self.is_editing_annotation_mode:
             self.commit_editing_annotation()
         self.save_pending_annotation()
+        # Save if data was changed during typing
+        if self.data_changed:
+            self.save()
         QTextEdit.focusOutEvent(self.text_box, event)
 
     def text_focus_in(self, event):
@@ -2289,7 +2515,7 @@ class PVAnnotator(QWidget):
             self.text_box.blockSignals(True)
             self.text_box.setText("")
             self.text_box.blockSignals(False)
-            self.save()
+            self.mark_data_changed()
             return
 
         # Remove it
@@ -2331,13 +2557,13 @@ class PVAnnotator(QWidget):
             if active is None:
                 active = annotations[0]
             active["text"] = self.text_box.toPlainText()
-        self.save()
+        self.mark_data_changed()
 
     def update_location_text(self,text):
         p=self.current()
         data_key = self.get_data_key()
         self.data.setdefault(data_key,{}).setdefault("location",{})["manual_text"]=text
-        self.save()
+        self.mark_data_changed()
 
     def update_creation_time(self):
         """Parse and validate the user-edited creation time, immediately update display and resort."""
@@ -2422,7 +2648,7 @@ class PVAnnotator(QWidget):
                         else:
                             time_str = str(new_time)
                         self.image_time_input.setText(f"{time_str} {time_text}")
-                        self.save()
+                        self.mark_data_changed()
                         # If slideshow is running, update the timer for current item
                         if self.slideshow:
                             self.restart_slideshow_timer()
@@ -2573,7 +2799,7 @@ class PVAnnotator(QWidget):
         entry = self.data.setdefault(data_key, {})
         current_skip = entry.get("skip", False)
         entry["skip"] = not current_skip  # Toggle skip state
-        self.save()
+        self.mark_data_changed()
         if not current_skip:  # If we just skipped it
             self.next_item()
         else:  # If we unskipped it, stay on the same item
@@ -2595,7 +2821,7 @@ class PVAnnotator(QWidget):
             entry.pop("rotation",None)
         else:
             entry["rotation"]=new_rotation
-        self.save()
+        self.mark_data_changed()
         self.show_item()
 
     def duplicate_item(self):
@@ -2620,7 +2846,7 @@ class PVAnnotator(QWidget):
         self.data[new_key1] = copy.deepcopy(original_entry)
         self.data[new_key2] = copy.deepcopy(original_entry)
 
-        self.save()
+        self.mark_data_changed()
 
         # Now update self.media to include both versions
         # Insert the same Path object at the current position (for the second version)
@@ -2702,7 +2928,7 @@ class PVAnnotator(QWidget):
 
         # Store crop as (x1, y1, x2, y2)
         entry["crop"] = crop_coords
-        self.save()
+        self.mark_data_changed()
 
         # Exit crop mode and refresh display
         self.crop_mode = False
@@ -2719,7 +2945,7 @@ class PVAnnotator(QWidget):
         entry = self.data.get(data_key, {})
         if entry and "crop" in entry:
             del entry["crop"]
-            self.save()
+            self.mark_data_changed()
             self.crop_btn.setText("Crop")
             if sys.platform.startswith('linux') or sys.platform == 'darwin':
                 self.crop_btn.setStyleSheet("QPushButton { color: black; font-weight: bold; }")
@@ -2751,7 +2977,7 @@ class PVAnnotator(QWidget):
         # Apply volume immediately
         self.audio_output.setVolume(new_volume/100.0)
         self.volume_btn.setText(f"{new_volume}% volume")
-        self.save()
+        self.mark_data_changed()
 
     def trash_item(self):
         p=self.current()
@@ -2785,7 +3011,7 @@ class PVAnnotator(QWidget):
                 self.media_to_data_key = new_mapping
 
         self.index = min(self.index, len(self.media) - 1) if self.media else 0
-        self.save()
+        self.mark_data_changed()
 
         if self.media:
             # Skip over any files marked as skip=true ONLY when NOT in show_skipped_mode
