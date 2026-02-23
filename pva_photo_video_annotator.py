@@ -1159,8 +1159,7 @@ class PVAnnotator(QWidget):
 
     def handle_duplicate_filenames(self):
         """Find duplicate filenames and offer to rename them.
-        Handles both same and different timestamps."""
-        # Group files by exact filename - must be identical
+        Intelligently orders files so user stays in the same folder as long as possible."""
         from collections import defaultdict
         files_by_name = defaultdict(list)
 
@@ -1182,35 +1181,75 @@ class PVAnnotator(QWidget):
                 # All paths are the same - not duplicates
                 continue
 
-            # Get timestamps for each file
+            # Get timestamps for each file by reading directly from the files
+            # Don't use JSON data as it only stores one timestamp per filename
             file_info = []
             for p in file_paths:
-                data_key = p.name
-                entry = self.data.get(data_key, {})
-
-                # Try to get timestamp from data
-                ts = parse_creation_value(entry.get("creation_time_manual"))
-                if ts is None:
-                    ts = parse_creation_value(entry.get("creation_date_time"))
-                if ts is None:
-                    # Try to extract directly from file if not in JSON yet
-                    self.get_cached_creation_time(p)
-                    entry = self.data.get(data_key, {})
-                    ts = parse_creation_value(entry.get("creation_date_time"))
-                if ts is None:
-                    ts = 0
-
-                file_info.append((p, ts))
+                # Read the actual file's creation time
+                file_epoch, file_display, has_tz, tz_label = get_file_creation_time(p)
+                file_info.append((p, file_epoch, file_display))
 
             # Sort by timestamp
             file_info.sort(key=lambda x: x[1])
 
             # Check if all timestamps are the same
-            timestamps = [ts for _, ts in file_info]
+            timestamps = [ts for _, ts, _ in file_info]
             all_same_timestamp = len(set(timestamps)) == 1 and timestamps[0] != 0
 
             # Add to list - handle both same and different timestamps
             duplicates_to_handle.append((file_info, all_same_timestamp))
+
+        # INTELLIGENT SORTING: Order groups by folder frequency to minimize UI switching
+        # Count how many times each folder appears across all duplicate groups
+        folder_frequency = defaultdict(int)
+        for file_group, _ in duplicates_to_handle:
+            folders_in_group = set()
+            for file_path, _, _ in file_group:
+                try:
+                    folder = file_path.parent.relative_to(self.dir)
+                except ValueError:
+                    folder = file_path.parent
+                folders_in_group.add(str(folder))
+            
+            # Increment count for each folder in this group
+            for folder in folders_in_group:
+                folder_frequency[folder] += 1
+
+        # Sort groups by the "hottest" folder (most duplicates)
+        # This ensures user processes the most problematic folder first
+        def group_sort_key(group_tuple):
+            file_group, _ = group_tuple
+            # Find the folder with highest frequency in this group
+            max_frequency = 0
+            for file_path, _, _ in file_group:
+                try:
+                    folder = file_path.parent.relative_to(self.dir)
+                except ValueError:
+                    folder = file_path.parent
+                freq = folder_frequency[str(folder)]
+                max_frequency = max(max_frequency, freq)
+            # Sort descending by frequency (highest first), then by group size
+            return (-max_frequency, -len(file_group))
+
+        duplicates_to_handle.sort(key=group_sort_key)
+
+        # Within each group, sort files by folder frequency + timestamp
+        # This keeps files from the same folder together
+        def file_sort_key(file_tuple):
+            file_path, timestamp, _ = file_tuple
+            try:
+                folder = file_path.parent.relative_to(self.dir)
+            except ValueError:
+                folder = file_path.parent
+            folder_freq = folder_frequency[str(folder)]
+            # Sort by: -folder_frequency (hottest folder first), then +timestamp (chronological)
+            return (-folder_freq, timestamp)
+
+        for i, (file_group, same_timestamp) in enumerate(duplicates_to_handle):
+            # Sort files in this group by folder frequency + timestamp
+            file_group_list = list(file_group)
+            file_group_list.sort(key=file_sort_key)
+            duplicates_to_handle[i] = (file_group_list, same_timestamp)
 
         # Process each duplicate group
         for file_group, same_timestamp in duplicates_to_handle:
@@ -1231,8 +1270,11 @@ class PVAnnotator(QWidget):
             message_lines = ["These files have the same filename but different timestamps.\n"]
             message_lines.append("OK to modify the filenames as shown?\n\n")
 
-        for idx, (file_path, timestamp) in enumerate(file_group):
-            if timestamp > 0:
+        for idx, (file_path, timestamp, time_display) in enumerate(file_group):
+            # Use the display string read directly from the file
+            if time_display:
+                time_str = time_display
+            elif timestamp > 0:
                 time_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
             else:
                 time_str = "Unknown"
@@ -1287,7 +1329,7 @@ class PVAnnotator(QWidget):
         renamed_map = {}  # Old path -> new path
 
         # First pass: rename all files except the first
-        for idx, (file_path, _) in enumerate(file_group):
+        for idx, (file_path, _, _) in enumerate(file_group):
             if idx == 0:
                 continue  # Keep first file unchanged
 
