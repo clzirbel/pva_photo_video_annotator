@@ -7,7 +7,7 @@ import os
 from tinytag import TinyTag
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton,
     QTextEdit, QVBoxLayout, QHBoxLayout, QComboBox, QSlider, QFileDialog, QMessageBox, QLineEdit, QProgressDialog)
-from PySide6.QtCore import Qt, QTimer, QUrl, QPoint, QLoggingCategory, QRect
+from PySide6.QtCore import Qt, QTimer, QUrl, QPoint, QLoggingCategory, QRect, QEvent
 from PySide6.QtGui import QPixmap, QImage, QFont, QColor, QTextCursor, QPainter, QPen
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -806,6 +806,8 @@ class PVAnnotator(QWidget):
         self.text_box.setFont(QFont("Arial",DEFAULT_FONT_SIZE))
         # Only accept plain text to prevent formatting from pasted content
         self.text_box.setAcceptRichText(False)
+        # Allow capturing Tab while editing to implement custom navigation
+        self.text_box.installEventFilter(self)
         self._text_change_in_progress = False
 
         self.skip_in_progress = False
@@ -1210,7 +1212,7 @@ class PVAnnotator(QWidget):
                 except ValueError:
                     folder = file_path.parent
                 folders_in_group.add(str(folder))
-            
+
             # Increment count for each folder in this group
             for folder in folders_in_group:
                 folder_frequency[folder] += 1
@@ -1946,7 +1948,16 @@ class PVAnnotator(QWidget):
             if self.slideshow:
                 self._prepare_text_for_slideshow(text)
 
-        self.setFocus()
+        # Put keyboard focus into the annotation text box so typing starts immediately
+        try:
+            self.text_box.setFocus()
+            cursor = self.text_box.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            self.text_box.setTextCursor(cursor)
+            self.text_box.ensureCursorVisible()
+        except Exception:
+            # Fallback to giving overall widget focus if something goes wrong
+            self.setFocus()
         # Media display
         if p.suffix.lower() in SUPPORTED_IMAGES:
             self.video_widget.hide(); self.video_slider.hide()
@@ -3517,6 +3528,35 @@ class PVAnnotator(QWidget):
         if event.key()==Qt.Key_Right: self.next_item()
         elif event.key()==Qt.Key_Left: self.prev_item()
         else: super().keyPressEvent(event)
+
+    def eventFilter(self, obj, event):
+        # Intercept Tab key presses in the annotation text box to advance images
+        if obj is self.text_box and event.type() == QEvent.KeyPress:
+            # Handle Tab -> Next for images
+            if event.key() == Qt.Key_Tab and not (event.modifiers() & Qt.ShiftModifier):
+                try:
+                    p = self.current()
+                    # Only treat Tab as Next for images, not videos
+                    if p.suffix.lower() in SUPPORTED_IMAGES:
+                        # Commit any pending edits and go to next item
+                        self.finish_edit_mode()
+                        self.save_pending_annotation()
+                        self.next_item()
+                        return True
+                except Exception:
+                    pass
+            # Handle Shift+Tab (or Backtab) -> Previous for images
+            if event.key() == Qt.Key_Backtab or (event.key() == Qt.Key_Tab and (event.modifiers() & Qt.ShiftModifier)):
+                try:
+                    p = self.current()
+                    if p.suffix.lower() in SUPPORTED_IMAGES:
+                        self.finish_edit_mode()
+                        self.save_pending_annotation()
+                        self.prev_item()
+                        return True
+                except Exception:
+                    pass
+        return super().eventFilter(obj, event)
 
 if __name__=="__main__":
     # Suppress FFmpeg's stderr output (AAC codec warnings, etc.)
